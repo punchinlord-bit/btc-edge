@@ -24,6 +24,7 @@ from btc_edge.execution.safety import SafetyWatchdog
 from btc_edge.features import indicators
 from btc_edge.features.regime import RegimeClassifier, realized_vol_from_prices
 from btc_edge.ml.model import ProbabilityEnsemble
+from btc_edge.ml.strategy_registry import Registry
 from btc_edge.strategies.base import MarketContext
 from btc_edge.strategies.crowd_follow import CrowdFollowStrategy
 from btc_edge.strategies.iv_mispricing import IvMispricingStrategy
@@ -57,10 +58,12 @@ class TradingLoop:
         feed: LiveMarketFeed,
         kalshi_client: Any | None = None,
         poly_client: Any | None = None,
+        registry: Registry | None = None,
     ) -> None:
         self.state = state
         self.settings = settings
         self.feed = feed
+        self.registry = registry or Registry()
         self._ensembles: dict[tuple[int, str], ProbabilityEnsemble] = {
             (tf, venue): ProbabilityEnsemble() for tf, venue, _ in TRADING_WINDOWS
         }
@@ -162,12 +165,108 @@ class TradingLoop:
         pnl = self._settle_positions(tf, venue, outcome)
         if w["last_features"]:
             ens = self._ensembles[(tf, venue)]
-            ens.update(w["last_features"], outcome, tf)
-            ens.retrain_lgbm()
+            self._record_and_gate(ens, tf, venue, w["last_features"], outcome, open_price, spot)
         self._total_pnl += pnl
         self._equity_curve.append((time.time(), self._total_pnl))
         if len(self._equity_curve) > 200:
             self._equity_curve = self._equity_curve[-200:]
+
+    def _record_and_gate(
+        self,
+        ens: ProbabilityEnsemble,
+        tf: int,
+        venue: str,
+        features: dict[str, Any],
+        outcome: float,
+        open_price: float,
+        spot: float,
+    ) -> None:
+        """Record the resolved window as an OOS sample, then gate the model update.
+
+        The online logistic update becomes a CHALLENGER; it is only applied when the
+        promotion gate clears (or when there is not yet enough OOS data to judge).
+        """
+        from btc_edge.ml.model import feature_dict
+        from btc_edge.ml.promotion_gate import (
+            CHAMPION,
+            StrategyVersion,
+            WindowEvaluation,
+            classify_3regime,
+        )
+
+        normalized = feature_dict(features, tf)
+        abs_move_pct = abs(spot - open_price) / open_price * 100.0
+        regime = classify_3regime(abs_move_pct)
+
+        self.registry.record_window(WindowEvaluation(
+            window_start_sec=(int(time.time()) // tf) * tf,
+            strike_price=open_price,
+            close_price=spot,
+            outcome=1 if outcome >= 0.5 else 0,
+            regime=regime,
+            features=normalized,
+            market_ask_up=0.52,
+            market_ask_down=0.52,
+            fee_rate=0.015,
+        ))
+
+        champion_config = ens.logreg_weights()
+        challenger_config = ens.proposed_logreg_weights(features, outcome, tf)
+
+        apply_update = True
+        if champion_config and challenger_config:
+            champion = StrategyVersion(
+                version_id=f"{venue}-{tf}-champion", status=CHAMPION, config=champion_config
+            )
+            challenger = StrategyVersion(
+                version_id=f"{venue}-{tf}-{int(time.time())}", config=challenger_config
+            )
+            result = self.registry.gate.evaluate_and_promote(
+                challenger, self.registry.windows, champion
+            )
+            self.registry.last_result = {
+                "passed": result.passed,
+                "challenger_version_id": result.challenger_version_id,
+                "champion_version_id": result.champion_version_id,
+                "challenger_brier": result.challenger_brier,
+                "champion_brier": result.champion_brier,
+                "challenger_net_ev": result.challenger_net_ev,
+                "champion_net_ev": result.champion_net_ev,
+                "regime_win_rates": result.regime_win_rates,
+                "jitter_retention": result.jitter_retention,
+                "checks": result.checks,
+                "reasons": result.reasons,
+            }
+            if result.passed:
+                self.registry.champion_id = champion.version_id
+                self.registry.versions[champion.version_id] = champion
+            elif result.checks.get("sample_floor") is not False:
+                # Enough OOS data and the challenger failed a hard gate — keep champion.
+                apply_update = False
+                logger.info(
+                    "gate rejected model update (%s %ss): %s", venue, tf, result.reasons
+                )
+
+        if apply_update:
+            ens.update(features, outcome, tf)
+        ens.retrain_lgbm()
+        self._persist_registry()
+
+    def _persist_registry(self) -> None:
+        """Best-effort persist the registry to SQLite (throttled, never crashes)."""
+        now = time.time()
+        if now - getattr(self, "_last_registry_save", 0.0) < 60.0:
+            return
+        self._last_registry_save = now
+        try:
+            from btc_edge.db.session import Database
+            from btc_edge.ml.strategy_registry import save_registry
+
+            db = Database(self.settings.db_path)
+            save_registry(db.session(), self.registry)
+            db.close()
+        except Exception as exc:  # noqa: BLE001 - persistence is best-effort
+            logger.warning("registry persist failed: %s", exc)
 
     def _settle_positions(self, tf: int, venue: str, outcome: float) -> float:
         pnl = 0.0

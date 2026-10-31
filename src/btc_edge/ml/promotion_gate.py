@@ -27,6 +27,21 @@ SPIKE = "spike"
 REGIMES: tuple[str, ...] = (CHOP, TREND, SPIKE)
 
 
+def classify_3regime(abs_move_pct: float) -> str:
+    """Map a 15m window's absolute price move (%) to chop / trend / spike.
+
+    Thresholds are tuned for a 15-minute BTC window:
+    * ``<= 0.03%`` — effectively flat (chop / mean-reversion).
+    * ``>= 0.15%`` — a large directional or liquidation-driven move (spike).
+    * otherwise — a moderate directional expansion (trend).
+    """
+    if abs_move_pct >= 0.15:
+        return SPIKE
+    if abs_move_pct <= 0.03:
+        return CHOP
+    return TREND
+
+
 @dataclass(slots=True)
 class WindowEvaluation:
     """One resolved 15-minute BTC window (a single OOS sample for the gate)."""

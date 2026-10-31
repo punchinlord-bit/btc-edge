@@ -27,7 +27,7 @@ from btc_edge.execution.killswitch import KillSwitch
 from btc_edge.execution.trading_loop import TradingLoop
 from btc_edge.features.sentiment_analyzer import SentimentAnalyzer
 from btc_edge.ml.self_healing_filter import NewsIntelligence, SelfHealingFilter
-from btc_edge.web.app import app, engine_state
+from btc_edge.web.app import _registry, app, engine_state
 from btc_edge.web.live_feed import LiveMarketFeed
 
 
@@ -126,6 +126,14 @@ def main() -> int:
     db = Database(settings.db_path)
     _ = db  # keep the handle alive for the process lifetime
 
+    # Rehydrate the Champion/Challenger strategy registry from any prior run.
+    try:
+        from btc_edge.ml.strategy_registry import load_registry
+
+        load_registry(db.session(), _registry)
+    except Exception as exc:  # noqa: BLE001 - registry load is best-effort
+        print(f"Strategy registry load skipped: {exc}")
+
     # Build the news-intelligence pipeline.
     scraper = NewsScraper(
         min_relevance=settings.news.min_relevance,
@@ -179,6 +187,7 @@ def main() -> int:
     trader = TradingLoop(
         engine_state, settings, feed,
         kalshi_client=kalshi_client, poly_client=poly_client,
+        registry=_registry,
     )
     loop.create_task(trader.run())
 

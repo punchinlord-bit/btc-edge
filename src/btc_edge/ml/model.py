@@ -44,6 +44,16 @@ def feature_vector(features: dict[str, float], timeframe_seconds: int = 300) -> 
     return np.asarray(vec, dtype=float)
 
 
+def feature_dict(features: dict[str, float], timeframe_seconds: int = 300) -> dict[str, float]:
+    """Map raw features to a ``{FEATURE_ORDER[i]: normalized_value}`` dict.
+
+    This is the normalized representation the promotion gate consumes: a logistic
+    ``config`` keyed by the same names can be dotted against it directly.
+    """
+    vec = feature_vector(features, timeframe_seconds)
+    return {name: float(vec[i]) for i, name in enumerate(FEATURE_ORDER)}
+
+
 class OnlineLogisticRegression:
     """Streaming logistic regression via SGD (log-loss)."""
 
@@ -144,3 +154,41 @@ class ProbabilityEnsemble:
             X = np.vstack(self._history_X)
             y = np.asarray(self._history_y)
             self.lgbm.fit(X, y)
+
+    def logreg_weights(self) -> dict[str, float]:
+        """Serialize the online logistic weights as ``{feature: weight, 'bias': b}``.
+
+        Empty (``{}``) when the logistic model has not been fitted yet.
+        """
+        if not self.logreg.fitted:
+            return {}
+        coef = self.logreg.model.coef_[0]
+        intercept = float(self.logreg.model.intercept_[0])
+        out: dict[str, float] = {"bias": intercept}
+        for i, name in enumerate(FEATURE_ORDER):
+            out[name] = float(coef[i])
+        return out
+
+    def proposed_logreg_weights(
+        self, features: dict[str, float], outcome: float, timeframe_seconds: int = 300
+    ) -> dict[str, float]:
+        """Weights the logistic model *would* have after one more ``partial_fit``.
+
+        Returns the hypothetical challenger config without mutating the live model,
+        so the promotion gate can compare champion vs. challenger before committing.
+        """
+        import copy
+
+        clone = copy.deepcopy(self.logreg.model)
+        x = feature_vector(features, timeframe_seconds).reshape(1, -1)
+        y = np.array([1 if outcome >= 0.5 else 0])
+        try:
+            clone.partial_fit(x, y, classes=np.array([0, 1]))
+        except Exception:  # noqa: BLE001 - fall back to current weights on any fit error
+            return self.logreg_weights() or {"bias": 0.0}
+        coef = clone.coef_[0]
+        intercept = float(clone.intercept_[0])
+        out: dict[str, float] = {"bias": intercept}
+        for i, name in enumerate(FEATURE_ORDER):
+            out[name] = float(coef[i])
+        return out
