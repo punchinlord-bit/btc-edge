@@ -9,12 +9,53 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <script src="https://unpkg.com/lightweight-charts@5.0.3/dist/lightweight-charts.standalone.production.js"></script>
   <style>
-    body { background: #0b0f1a; color: #e5e7eb; font-family: ui-sans-serif, system-ui, sans-serif; }
-    .card { background: #131a2a; border: 1px solid #1f2a44; border-radius: 0.9rem; padding: 1rem; }
-    .widget-title { display:flex; align-items:center; gap:0.5rem; font-size:0.75rem; letter-spacing:0.05em; text-transform:uppercase; color:#9ca3af; margin-bottom:0.6rem; }
-    .pill { padding:0.25rem 0.6rem; border-radius:9999px; font-size:0.75rem; font-weight:600; }
-    .stat-big { font-size:1.6rem; font-weight:800; font-variant-numeric: tabular-nums; }
-    .banner { border: 1px solid #1f2a44; border-radius: 0.75rem; overflow: hidden; }
+    :root {
+      --bg: #070a12;
+      --panel: rgba(19, 26, 42, 0.62);
+      --panel-border: rgba(56, 189, 248, 0.14);
+      --tx: #e7ecf5;
+      --mu: #8b96a8;
+      --accent: #38bdf8;
+      --green: #00f59b;
+      --red: #ff3b69;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background:
+        radial-gradient(1100px 550px at 12% -8%, rgba(56, 189, 248, 0.10), transparent 60%),
+        radial-gradient(900px 480px at 88% -4%, rgba(0, 245, 155, 0.07), transparent 55%),
+        var(--bg);
+      color: var(--tx);
+      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+    }
+    header.site { position: sticky; top: 0; z-index: 50; backdrop-filter: blur(14px); background: rgba(7, 10, 18, 0.75); border-bottom: 1px solid var(--panel-border); }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--panel-border);
+      border-radius: 1rem;
+      padding: 1.1rem;
+      backdrop-filter: blur(12px);
+      box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
+      transition: border-color .2s ease, transform .15s ease;
+    }
+    .card:hover { border-color: rgba(56, 189, 248, 0.3); }
+    .widget-title {
+      display: flex; align-items: center; gap: 0.5rem;
+      font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase;
+      color: var(--mu); margin-bottom: 0.6rem; font-weight: 700;
+    }
+    .pill { padding: 0.28rem 0.65rem; border-radius: 9999px; font-size: 0.72rem; font-weight: 700; white-space: nowrap; }
+    .stat-big { font-size: 1.75rem; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+    .banner { border: 1px solid var(--panel-border); border-radius: 0.9rem; overflow: hidden; box-shadow: 0 10px 28px rgba(0, 0, 0, 0.3); }
+    button { cursor: pointer; transition: filter .15s ease, transform .08s ease; }
+    button:active { transform: translateY(1px); }
+    button:hover { filter: brightness(1.08); }
+    table { border-collapse: collapse; }
+    .live-dot { display: inline-block; width: 8px; height: 8px; border-radius: 9999px; background: var(--green); box-shadow: 0 0 0 0 rgba(0,245,155,.6); animation: pulse 1.8s infinite; }
+    @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(0,245,155,.5); } 70% { box-shadow: 0 0 0 7px rgba(0,245,155,0); } 100% { box-shadow: 0 0 0 0 rgba(0,245,155,0); } }
   </style>
 </head>
 <body class="min-h-screen p-4 md:p-6 max-w-7xl mx-auto">
@@ -23,15 +64,18 @@
     <img src="/static/banner.png" alt="BTC-Edge" class="w-full h-auto block" />
   </div>
 
-  <header class="flex flex-wrap items-center justify-between gap-3 mb-6">
-    <div>
-      <h1 class="text-2xl font-bold tracking-tight flex items-center gap-2">⚡ BTC-Edge <span class="text-xs font-normal text-gray-500 align-middle">v3.1 · wallet-aware</span></h1>
-      <p id="greeting" class="text-sm text-gray-400 cursor-pointer hover:text-gray-200" title="Click to set your name">👋 Good day, Trader</p>
-    </div>
-    <div class="flex items-center gap-2 flex-wrap">
-      <span id="engine-status" class="pill bg-gray-700">⏳ checking…</span>
-      <span id="mode-badge" class="pill bg-red-700">🔴 LIVE</span>
-      <span id="trade-only" class="pill bg-gray-700">🔐 trade-only</span>
+  <header class="site mb-6 rounded-b-2xl">
+    <div class="flex flex-wrap items-center justify-between gap-3 py-3">
+      <div>
+        <h1 class="text-xl font-bold tracking-tight flex items-center gap-2">⚡ BTC-Edge <span class="text-xs font-normal text-gray-500 align-middle">v3.2 · premium</span></h1>
+        <p id="greeting" class="text-xs text-gray-400 cursor-pointer hover:text-gray-200" title="Click to set your name">👋 Good day, Trader</p>
+      </div>
+      <div class="flex items-center gap-2 flex-wrap">
+        <span class="pill bg-gray-800 font-mono"><span class="live-dot"></span> BTC <b id="header-btc">--</b></span>
+        <span id="engine-status" class="pill bg-gray-700">⏳ checking…</span>
+        <span id="mode-badge" class="pill bg-red-700">🔴 LIVE</span>
+        <span id="trade-only" class="pill bg-gray-700">🔐 trade-only</span>
+      </div>
     </div>
   </header>
 
@@ -406,6 +450,8 @@
       const btcEl = document.getElementById('btc-price');
       const newBtc = s.btc_price;
       btcEl.textContent = newBtc != null ? '$' + Number(newBtc).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '--';
+      const hdrEl = document.getElementById('header-btc');
+      if (hdrEl) hdrEl.textContent = newBtc != null ? '$' + Number(newBtc).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : '--';
       const hist = s.price_history || [];
       const deltaEl = document.getElementById('btc-delta');
       if (hist.length >= 2) {
