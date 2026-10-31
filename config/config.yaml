@@ -82,8 +82,8 @@ news:
 
 ai:
   enabled: true
-  base_url: "https://api.openai.com/v1"   # DeepSeek: https://api.deepseek.com/v1
-  model: "gpt-4o-mini"                    # DeepSeek: deepseek-chat
+  base_url: "https://api.deepseek.com/v1"   # ChatGPT: https://api.openai.com/v1
+  model: "deepseek-chat"                    # ChatGPT: gpt-4o-mini
 
 telegram:
   enabled: false

@@ -16,9 +16,9 @@ services:
       - key: AI_API_KEY
         sync: false
       - key: AI_BASE_URL
-        value: https://api.openai.com/v1
+        value: https://api.deepseek.com/v1
       - key: AI_MODEL
-        value: gpt-4o-mini
+        value: deepseek-chat
       # ---- Telegram alerts (optional) ----
       - key: TELEGRAM_BOT_TOKEN
         sync: false

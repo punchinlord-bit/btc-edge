@@ -35,3 +35,7 @@ BACKTEST_VALIDATION_REPORT.md
 Thumbs.db
 .idea/
 .vscode/
+
+# Runtime logs (server output, never committed)
+*.log
+

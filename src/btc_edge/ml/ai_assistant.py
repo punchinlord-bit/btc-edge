@@ -150,8 +150,11 @@ class AIAssistant:
 def build_assistant(settings) -> AIAssistant:
     import os
 
+    # base_url / model are overridable via env so one key works with either
+    # provider (e.g. DeepSeek: AI_BASE_URL=https://api.deepseek.com/v1,
+    # AI_MODEL=deepseek-chat), falling back to config.yaml.
     return AIAssistant(
-        base_url=settings.ai.base_url,
+        base_url=os.getenv("AI_BASE_URL", settings.ai.base_url),
         api_key=os.getenv("AI_API_KEY", ""),
-        model=settings.ai.model,
+        model=os.getenv("AI_MODEL", settings.ai.model),
     )
