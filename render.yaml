@@ -4,7 +4,7 @@ services:
   - type: web
     name: btc-edge
     runtime: docker
-    plan: free
+    plan: standard   # paid tier — REQUIRED for the persistent disk below (free tier has no disks)
     healthCheckPath: /api/health
     envVars:
       # ---- Safety (paper-first) ----
