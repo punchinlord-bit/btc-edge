@@ -158,12 +158,16 @@ class Router:
             # KXBTC15M is "BTC price up in next 15 mins?" — a pure up/down binary.
             # "up" -> buy YES; "down" -> buy NO (sell YES).
             side = "yes" if decision.side == "up" else "no"
+            # Taker orders use immediate-or-cancel (fills now); maker orders rest as
+            # good-till-canceled. IOC avoids the full resting-collateral requirement.
+            order_type = "limit" if is_maker else "market"
             await self.kalshi_client.place_order(
                 ticker=kalshi_ticker or self.settings.kalshi.market_ticker,
                 side=side,
                 action=decision.action,
                 count=max(1, int(round(size))),
                 price=price,
+                order_type=order_type,
                 post_only=is_maker,
             )
         elif venue == "polymarket" and self.poly_client is not None and token_id:
