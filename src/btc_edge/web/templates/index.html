@@ -74,6 +74,7 @@
         <span id="feed-age" class="text-xs text-gray-500">connecting…</span>
       </div>
       <div class="stat-big text-green-400 font-mono" id="btc-price">--</div>
+      <div id="btc-delta" class="text-sm font-mono text-gray-400">—</div>
       <canvas id="price-chart" height="90"></canvas>
     </div>
     <div class="card">
@@ -242,7 +243,27 @@
       tp.textContent = signedMoney(totalPnl); tp.className = pnlClass(totalPnl);
       document.getElementById('wallet-total-atrisk').textContent = money(s.at_risk_usd);
 
-      document.getElementById('btc-price').textContent = s.btc_price != null ? '$' + Number(s.btc_price).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '--';
+      const btcEl = document.getElementById('btc-price');
+      const newBtc = s.btc_price;
+      btcEl.textContent = newBtc != null ? '$' + Number(newBtc).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '--';
+      const hist = s.price_history || [];
+      const deltaEl = document.getElementById('btc-delta');
+      if (hist.length >= 2) {
+        const cur = hist[hist.length - 1][1];
+        const refIdx = Math.max(0, hist.length - 11);
+        const ref = hist[refIdx][1];
+        const d = cur - ref;
+        const pct = ref ? (d / ref) * 100 : 0;
+        const span = hist[hist.length - 1][0] - hist[refIdx][0];
+        const perSec = span > 0 ? d / span : 0;
+        const dir = d >= 0 ? '▲' : '▼';
+        const color = d >= 0 ? 'text-green-400' : 'text-red-400';
+        deltaEl.textContent = dir + ' $' + Math.abs(d).toFixed(2) + ' (' + (d >= 0 ? '+' : '') + pct.toFixed(3) + '%) · ' + (perSec >= 0 ? '+' : '') + '$' + Math.abs(perSec).toFixed(2) + '/s';
+        deltaEl.className = 'text-sm font-mono ' + color;
+        btcEl.className = 'stat-big font-mono ' + color;
+      } else {
+        deltaEl.textContent = '—';
+      }
       if (s.feed_updated_at) {
         const age = Math.max(0, Math.round((Date.now() / 1000) - s.feed_updated_at));
         document.getElementById('feed-age').textContent = '🔄 ' + age + 's ago';
@@ -267,7 +288,13 @@
       document.getElementById('kalshi-meter').innerHTML = '<div class="flex justify-between text-xs text-gray-400 mb-1"><span>Yes</span><span class="text-green-400">' + (yes != null ? yes.toFixed(0) + '%' : '--') + '</span></div>' + pctBar(kal.prob_up, 'bg-blue-500') + '<div class="text-xs text-gray-500 mt-1">No ' + (yes != null ? (100 - yes).toFixed(0) : '--') + '%</div>';
 
       const cd = s.window_countdowns || {};
-      document.getElementById('countdowns').innerHTML = Object.keys(cd).map(k => '<div class="flex justify-between"><span class="text-gray-400">' + k + '</span><b>' + fmtCountdown(cd[k]) + '</b></div>').join('') || '<div class="text-gray-500">--</div>';
+      const winTotals = { '5m': 300, '15m': 900 };
+      document.getElementById('countdowns').innerHTML = Object.keys(cd).map(k => {
+        const total = winTotals[k] || 300;
+        const remaining = cd[k];
+        const elapsed = Math.max(0, Math.min(1, 1 - remaining / total));
+        return '<div class="mb-2"><div class="flex justify-between text-xs text-gray-400 mb-1"><span>' + k + '</span><b class="text-gray-200">' + fmtCountdown(remaining) + '</b></div><div class="w-full bg-gray-800 rounded-full h-2"><div class="h-2 rounded-full ' + (elapsed > 0.8 ? 'bg-red-500' : 'bg-yellow-500') + '" style="width:' + (elapsed * 100) + '%"></div></div></div>';
+      }).join('') || '<div class="text-gray-500">--</div>';
 
       document.getElementById('brti').textContent = s.brti_60s != null ? '$' + Number(s.brti_60s).toFixed(2) : '--';
       document.getElementById('strike').textContent = s.open_strike != null ? '$' + Number(s.open_strike).toFixed(2) : '--';

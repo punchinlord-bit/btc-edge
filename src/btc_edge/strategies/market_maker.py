@@ -7,6 +7,8 @@ refreshing every 15 seconds (or immediately on a >0.03% spot move).
 
 from __future__ import annotations
 
+import time
+
 from btc_edge.features.pattern_engine import Condition, Operand, RuleGroup
 from btc_edge.strategies.base import MarketContext, Strategy, StrategyDecision
 
@@ -27,6 +29,7 @@ class MarketMakerStrategy(Strategy):
         self.min_spread = min_spread
         self.refresh_seconds = refresh_seconds
         self.spot_move_pct = spot_move_pct
+        self._last_quote_ts: float = 0.0
         self.rule = self._build_rule()
 
     def _build_rule(self) -> RuleGroup:
@@ -38,6 +41,10 @@ class MarketMakerStrategy(Strategy):
         )
 
     def evaluate(self, ctx: MarketContext) -> list[StrategyDecision]:
+        # Throttle: only re-quote every ``refresh_seconds`` (avoids flooding the
+        # book / the dashboard with identical quotes every 2s tick).
+        if time.time() - self._last_quote_ts < self.refresh_seconds:
+            return []
         snapshot = self.rule.snapshot(ctx.features())
         if not snapshot["result"]:
             return []
@@ -45,6 +52,8 @@ class MarketMakerStrategy(Strategy):
         spread = ctx.best_ask - ctx.best_bid
         if spread < self.min_spread:
             return []
+
+        self._last_quote_ts = time.time()
 
         fair = ctx.prob_estimate
         decisions: list[StrategyDecision] = []
