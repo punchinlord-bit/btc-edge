@@ -1,5 +1,5 @@
 trading:
-  mode: "live"                  # LIVE trading (real money). Dual gate: also needs ALLOW_LIVE_TRADING=TRUE.
+  mode: "paper"                 # MUST default to "paper". Live via BTC_EDGE_MODE=live + ALLOW_LIVE_TRADING=TRUE.
   base_currency: "USD"
   bankroll: 100.0
   max_daily_loss_pct: 5.0       # circuit breaker: halt if daily loss exceeds this % of bankroll

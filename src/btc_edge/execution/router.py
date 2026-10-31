@@ -94,10 +94,10 @@ class Router:
         dollar = quarter_kelly_size(prob, price, bankroll, cap_pct)
         size = shares_from_dollars(dollar, price)
         size = fee_models.apply_min_order(_venue(decision, self.settings), size)
-        if size <= 0 and not self.live_allowed:
-            # Paper mode: with a small bankroll the Quarter-Kelly size can fall
-            # below the venue minimum and get rejected — which makes the bot look
-            # idle. Enforce a visible minimum so simulated trades actually occur.
+        if size <= 0:
+            # With a small bankroll the Quarter-Kelly size can fall below the venue
+            # minimum and get rejected — which makes the bot idle. Enforce a visible
+            # minimum (5 shares Polymarket / 1 contract Kalshi) so orders actually go out.
             venue = _venue(decision, self.settings)
             size = fee_models.POLYMARKET_MIN_SHARES if venue == "polymarket" else 1.0
         return size

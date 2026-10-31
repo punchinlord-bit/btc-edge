@@ -222,8 +222,11 @@ class Settings(BaseSettings):
         return v
 
     def live_trading_allowed(self) -> bool:
-        """Dual safety check: mode == 'live' AND allow_live_trading == True."""
-        return self.trading.mode == "live" and self.allow_live_trading
+        """Dual safety check: mode == 'live' AND ALLOW_LIVE_TRADING == 'TRUE'."""
+        return (
+            self.trading.mode == "live"
+            and os.getenv("ALLOW_LIVE_TRADING") == "TRUE"
+        )
 
     @property
     def db_path(self) -> Path:
@@ -254,6 +257,10 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
         yaml_data.setdefault("kalshi", {})["use_demo"] = (
             kalshi_env.strip().lower() in {"true", "1", "yes", "on"}
         )
+
+    mode_env = os.getenv("BTC_EDGE_MODE")
+    if mode_env is not None:
+        yaml_data.setdefault("trading", {})["mode"] = mode_env.strip().lower()
 
     settings = Settings(_env_file=os.getenv("BTC_EDGE_ENV_FILE", ".env"), **yaml_data)
     settings.config_path = path

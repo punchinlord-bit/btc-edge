@@ -17,6 +17,7 @@ import asyncio
 import sys
 
 import httpx
+from dotenv import load_dotenv
 
 from btc_edge.config import load_settings
 
@@ -82,6 +83,7 @@ async def test_polymarket(settings) -> bool:
 
 
 async def main() -> int:
+    load_dotenv()  # load .env into os.environ so os.getenv() reads it
     parser = argparse.ArgumentParser(description="$0.01 live order test")
     parser.add_argument("--venue", default="both", choices=["kalshi", "polymarket", "both"])
     args = parser.parse_args()

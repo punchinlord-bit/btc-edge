@@ -15,6 +15,8 @@ import os
 import sys
 from typing import Any
 
+from dotenv import load_dotenv
+
 from btc_edge.config import load_settings
 from btc_edge.connectors.news_scraper import NewsScraper
 from btc_edge.db.session import Database
@@ -80,6 +82,7 @@ async def _balance_loop(settings, engine_state) -> None:
 
 
 def main() -> int:
+    load_dotenv()  # load .env into os.environ so os.getenv() reads it
     settings = load_settings()
     _setup_logging(settings.logging.level)
 
