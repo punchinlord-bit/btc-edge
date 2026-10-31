@@ -32,11 +32,12 @@ if STATIC_DIR.is_dir():
 def require_auth(x_api_key: str | None = Header(default=None)) -> None:
     """Require a shared API key on protected endpoints.
 
-    Reads ``DASHBOARD_API_KEY`` fresh from the environment so it can be set at
-    deploy time. When the key is unset (local development) auth is skipped; in
-    production it MUST be set.
+    Reads ``DASHBOARD_API_KEY`` from the process environment first (so it can be
+    set at deploy time, e.g. Render env vars), then falls back to the value in
+    ``.env`` via :class:`Settings`. When the key is unset (local development)
+    auth is skipped; in production it MUST be set.
     """
-    expected = os.getenv("DASHBOARD_API_KEY", "")
+    expected = os.getenv("DASHBOARD_API_KEY", "") or _settings.dashboard_api_key
     if expected and x_api_key != expected:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
@@ -218,7 +219,7 @@ def favicon() -> FileResponse:
 
 @app.websocket("/ws/live")
 async def ws_live(ws: WebSocket, x_api_key: str | None = Header(default=None)) -> None:
-    expected = os.getenv("DASHBOARD_API_KEY", "")
+    expected = os.getenv("DASHBOARD_API_KEY", "") or _settings.dashboard_api_key
     if expected and x_api_key != expected:
         await ws.close(code=1008)  # policy violation
         return

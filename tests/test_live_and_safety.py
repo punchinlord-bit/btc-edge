@@ -101,7 +101,14 @@ def test_assistant_offline_explain_async():
 
 # ------------------------------------------------------------- web endpoints
 
-def test_web_health_and_overview():
+def test_web_health_and_overview(monkeypatch):
+    # This test exercises the web endpoints themselves, not auth — so make the
+    # auth state deterministic by clearing any configured dashboard key.
+    monkeypatch.delenv("DASHBOARD_API_KEY", raising=False)
+    import btc_edge.web.app as app_module
+
+    monkeypatch.setattr(app_module._settings, "dashboard_api_key", "")
+
     from fastapi.testclient import TestClient
 
     from btc_edge.web.app import app

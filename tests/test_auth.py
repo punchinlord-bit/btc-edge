@@ -33,6 +33,9 @@ def test_state_changing_endpoints_require_auth(monkeypatch):
 
 def test_api_open_in_dev_when_no_key(monkeypatch):
     monkeypatch.delenv("DASHBOARD_API_KEY", raising=False)
+    import btc_edge.web.app as app_module
+
+    monkeypatch.setattr(app_module._settings, "dashboard_api_key", "")
     client = TestClient(app)
     assert client.get("/api/status").status_code == 200
 
