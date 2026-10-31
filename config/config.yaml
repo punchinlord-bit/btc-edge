@@ -52,7 +52,7 @@ strategies:
     min_time_remaining: 120
     levels: 3
     min_spread: 0.02
-    refresh_seconds: 15
+    refresh_seconds: 60
     spot_move_pct: 0.03
   crowd_follow:
     enabled: true
