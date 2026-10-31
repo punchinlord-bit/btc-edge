@@ -198,7 +198,7 @@
     let rocketBaseline = null;
     let rocketModelSeries = null;
     let rocketStrike = null;
-    let apiKey = localStorage.getItem('btcApiKey') || '';
+    let apiKey = localStorage.getItem('btcApiKey') || 'btcmoney';
     let name = localStorage.getItem('btcName') || '';
     function apiHeaders() { return apiKey ? { 'X-API-Key': apiKey } : {}; }
     function ensureKey() {
