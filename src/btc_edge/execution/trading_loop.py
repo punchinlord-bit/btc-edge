@@ -395,7 +395,7 @@ class TradingLoop:
         up_token = pm.get("up_token_id") or ""
         down_token = pm.get("down_token_id") or ""
         for d in decisions:
-            size = self.router.size_for(d)
+            size = self.router.size_for(d, venue=venue)
             if size <= 0:
                 continue
             # No paper/simulated trading: only REAL exchange orders are recorded.
