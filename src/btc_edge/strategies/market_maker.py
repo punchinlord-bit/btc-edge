@@ -57,13 +57,14 @@ class MarketMakerStrategy(Strategy):
 
         self._last_quote_ts[venue] = time.time()
 
-        # Quote around the market mid (contract_price), snapped to the 1-cent tick
-        # grid, both legs. This is the configuration that placed orders successfully.
+        # Buy around the market mid on a 1-cent grid. On Kalshi, quote ONLY the bid
+        # (buy YES) side — verified that "sell YES" (short) returns `insufficient_balance`
+        # because it needs USDC margin the account can't post, while "buy YES" pays in
+        # USD and is accepted. Polymarket US supports both legs, so keep both there.
         fair = ctx.contract_price
         decisions: list[StrategyDecision] = []
         for lvl in range(self.levels):
             bid_price = max(0.01, round(fair - (lvl + 1) * (spread / 2.0), 2))
-            ask_price = min(0.99, round(fair + (lvl + 1) * (spread / 2.0), 2))
             decisions.append(StrategyDecision(
                 strategy=self.name,
                 side="up",
@@ -76,16 +77,18 @@ class MarketMakerStrategy(Strategy):
                 ev_estimate=fair - bid_price,
                 rule_snapshot=snapshot,
             ))
-            decisions.append(StrategyDecision(
-                strategy=self.name,
-                side="up",
-                action="sell",
-                price=ask_price,
-                size=5.0,
-                order_type="maker",
-                reason=f"ask level {lvl + 1}",
-                prob_estimate=fair,
-                ev_estimate=ask_price - fair,
-                rule_snapshot=snapshot,
-            ))
+            if venue != "kalshi":
+                ask_price = min(0.99, round(fair + (lvl + 1) * (spread / 2.0), 2))
+                decisions.append(StrategyDecision(
+                    strategy=self.name,
+                    side="up",
+                    action="sell",
+                    price=ask_price,
+                    size=5.0,
+                    order_type="maker",
+                    reason=f"ask level {lvl + 1}",
+                    prob_estimate=fair,
+                    ev_estimate=ask_price - fair,
+                    rule_snapshot=snapshot,
+                ))
         return decisions
