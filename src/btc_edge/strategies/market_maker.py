@@ -57,11 +57,13 @@ class MarketMakerStrategy(Strategy):
 
         self._last_quote_ts[venue] = time.time()
 
-        fair = ctx.prob_estimate
+        # Quote around the *market* mid (contract_price), snapped to the 1-cent tick
+        # grid, so orders are both on-grid and near the current market.
+        fair = ctx.contract_price
         decisions: list[StrategyDecision] = []
         for lvl in range(self.levels):
-            bid_price = max(0.01, round(fair - (lvl + 1) * (spread / 2.0), 4))
-            ask_price = min(0.99, round(fair + (lvl + 1) * (spread / 2.0), 4))
+            bid_price = max(0.01, round(fair - (lvl + 1) * (spread / 2.0), 2))
+            ask_price = min(0.99, round(fair + (lvl + 1) * (spread / 2.0), 2))
             decisions.append(StrategyDecision(
                 strategy=self.name,
                 side="up",
