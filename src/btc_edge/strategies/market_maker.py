@@ -57,16 +57,13 @@ class MarketMakerStrategy(Strategy):
 
         self._last_quote_ts[venue] = time.time()
 
-        # Quote BIDs (buys) around the *ensemble's* fair probability, snapped to the
-        # 1-cent tick grid. We only quote the BID side: a small balance cannot SHORT
-        # without posting margin (Kalshi rejects with `insufficient_balance`), and
-        # positions close at window settlement, so the ask leg is unnecessary here.
-        # Using the ensemble fair value (not the market mid) means a bid ABOVE the
-        # market ask fills immediately as a taker, while a bid below rests as maker.
-        fair = ctx.prob_estimate
+        # Quote around the market mid (contract_price), snapped to the 1-cent tick
+        # grid, both legs. This is the configuration that placed orders successfully.
+        fair = ctx.contract_price
         decisions: list[StrategyDecision] = []
         for lvl in range(self.levels):
             bid_price = max(0.01, round(fair - (lvl + 1) * (spread / 2.0), 2))
+            ask_price = min(0.99, round(fair + (lvl + 1) * (spread / 2.0), 2))
             decisions.append(StrategyDecision(
                 strategy=self.name,
                 side="up",
@@ -74,9 +71,21 @@ class MarketMakerStrategy(Strategy):
                 price=bid_price,
                 size=5.0,
                 order_type="maker",
-                reason=f"post-only bid level {lvl + 1}",
+                reason=f"bid level {lvl + 1}",
                 prob_estimate=fair,
                 ev_estimate=fair - bid_price,
+                rule_snapshot=snapshot,
+            ))
+            decisions.append(StrategyDecision(
+                strategy=self.name,
+                side="up",
+                action="sell",
+                price=ask_price,
+                size=5.0,
+                order_type="maker",
+                reason=f"ask level {lvl + 1}",
+                prob_estimate=fair,
+                ev_estimate=ask_price - fair,
                 rule_snapshot=snapshot,
             ))
         return decisions
