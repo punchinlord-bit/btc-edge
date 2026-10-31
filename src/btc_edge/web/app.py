@@ -34,6 +34,7 @@ async def _no_cache_assets(request: Request, call_next):
         response.headers["Expires"] = "0"
     return response
 
+
 TEMPLATE_DIR = Path(__file__).parent / "templates"
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -389,7 +390,11 @@ def rocket() -> HTMLResponse:
         return HTMLResponse("<html><body><h1>Rocket Chart</h1><p>Template missing.</p></body></html>")
     return HTMLResponse(
         path.read_text(encoding="utf-8"),
-        headers={"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache", "Expires": "0"},
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
     )
 
 
@@ -428,7 +433,11 @@ def index() -> HTMLResponse:
         return HTMLResponse("<html><body><h1>BTC-Edge</h1><p>Dashboard template missing.</p></body></html>")
     return HTMLResponse(
         path.read_text(encoding="utf-8"),
-        headers={"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache", "Expires": "0"},
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
     )
 
 
