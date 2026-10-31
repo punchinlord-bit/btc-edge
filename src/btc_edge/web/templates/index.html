@@ -129,12 +129,12 @@
 
   <section class="card mb-6">
     <div class="flex items-center justify-between mb-2">
-      <div class="widget-title" style="margin-bottom:0"><span>🏆</span> Champion vs Challenger Gate</div>
-      <button id="gate-eval-btn" class="px-4 py-1 rounded-lg bg-blue-700 hover:bg-blue-600 text-white text-sm font-semibold">Evaluate Challenger</button>
+      <div class="widget-title" style="margin-bottom:0"><span>🏆</span> Champion vs Challenger Gate <span class="pill bg-emerald-900/60 text-emerald-300" style="margin:0 0 0 0.5rem">AUTO</span></div>
+      <button id="gate-eval-btn" class="px-4 py-1 rounded-lg bg-blue-700 hover:bg-blue-600 text-white text-sm font-semibold">Run Now</button>
     </div>
     <div class="text-xs text-gray-400 mb-2">Champion <b id="gate-champion" class="text-gray-200">none</b> · OOS windows <b id="gate-oos" class="text-gray-200">0</b></div>
     <div id="gate-checks" class="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs"></div>
-    <div id="gate-verdict" class="text-xs text-gray-500 mt-2">Submit a challenger config to run the 5-gate promotion check.</div>
+    <div id="gate-verdict" class="text-xs text-gray-500 mt-2">Runs automatically every 15-min window — a new model must beat the champion on all 5 checks before it's promoted. No action needed.</div>
   </section>
 
   <section class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
@@ -392,7 +392,7 @@
         renderGate({ champion_version_id: null, oos_window_count: null, last_result: await r.json() });
         pollGate();
       } catch (e) { toast('Gate evaluation failed'); }
-      btn.disabled = false; btn.textContent = 'Evaluate Challenger';
+      btn.disabled = false; btn.textContent = 'Run Now';
     });
     function pctBar(p, color) {
       if (p == null || isNaN(p)) return '<div class="text-gray-500">--</div>';
