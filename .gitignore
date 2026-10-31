@@ -39,4 +39,5 @@ Thumbs.db
 
 # Runtime logs (server output, never committed)
 *.log
+server_*.txt
 
