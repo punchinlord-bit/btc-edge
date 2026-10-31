@@ -175,6 +175,46 @@ class NewsSourceMetric(Base):
     updated_at: Mapped[float] = mapped_column(Float, default=utcnow_ts)
 
 
+class StrategyVersion(Base):
+    """Versioned strategy registry (Champion vs. Challenger promotion gate)."""
+
+    __tablename__ = "strategy_versions"
+
+    version_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    market_key: Mapped[str] = mapped_column(String(32), default="btc_15m", index=True)
+    parent_version_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), default="CHALLENGER", index=True)
+    config_json: Mapped[str] = mapped_column(Text, default="{}")
+    metrics_json: Mapped[str] = mapped_column(Text, default="{}")
+    gate_checks_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_by: Mapped[str] = mapped_column(String(32), default="learning_loop")
+    evaluated_at: Mapped[float] = mapped_column(Float, default=utcnow_ts)
+    promoted_at: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    __table_args__ = (
+        Index("ix_strategy_versions_active_champ", "market_key", "status"),
+    )
+
+
+class Btc15mWindowEvaluation(Base):
+    """15-minute BTC window evaluation ledger (OOS samples for the gate)."""
+
+    __tablename__ = "btc_15m_window_evaluations"
+
+    window_start_sec: Mapped[int] = mapped_column(Integer, primary_key=True)
+    strike_price: Mapped[float] = mapped_column(Float)
+    close_price: Mapped[float] = mapped_column(Float)
+    outcome: Mapped[int] = mapped_column(Integer)  # 0 = down, 1 = up
+    regime: Mapped[str] = mapped_column(String(8))  # chop | trend | spike
+    features_json: Mapped[str] = mapped_column(Text, default="{}")
+    market_ask_up: Mapped[float] = mapped_column(Float, default=0.55)
+    market_ask_down: Mapped[float] = mapped_column(Float, default=0.55)
+    fee_rate: Mapped[float] = mapped_column(Float, default=0.015)
+    champion_version_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    champion_prob_up: Mapped[float | None] = mapped_column(Float, nullable=True)
+    created_at: Mapped[float] = mapped_column(Float, default=utcnow_ts)
+
+
 # Re-export helpers
 def current_ts() -> float:
     return time.time()

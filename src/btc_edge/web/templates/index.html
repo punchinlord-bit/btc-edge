@@ -7,6 +7,7 @@
   <link rel="icon" type="image/png" href="/static/favicon.png" />
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://unpkg.com/lightweight-charts@5.0.3/dist/lightweight-charts.standalone.production.js"></script>
   <style>
     body { background: #0b0f1a; color: #e5e7eb; font-family: ui-sans-serif, system-ui, sans-serif; }
     .card { background: #131a2a; border: 1px solid #1f2a44; border-radius: 0.9rem; padding: 1rem; }
@@ -68,6 +69,19 @@
     </div>
   </section>
 
+
+  <section class="card mb-6">
+    <div class="flex items-center justify-between mb-2">
+      <div class="widget-title" style="margin-bottom:0"><span>🚀</span> 15m Rocket — Price vs Strike</div>
+      <span id="rocket-timer" class="pill bg-gray-800 font-mono text-amber-400">--:--</span>
+    </div>
+    <div id="rocket-chart" class="relative w-full" style="height:240px;"></div>
+    <div class="text-xs text-gray-400 mt-2">
+      Strike <b id="rocket-strike" class="text-gray-200">--</b>
+      · Model P(up) <b id="rocket-prob" class="text-cyan-300">--</b>
+      · <span id="rocket-delta" class="font-mono">--</span>
+    </div>
+  </section>
 
   <section class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
     <div class="card">
@@ -170,6 +184,10 @@
     let priceChart = null;
     let probChart = null;
     let probHist = [];
+    let rocketChart = null;
+    let rocketBaseline = null;
+    let rocketModelSeries = null;
+    let rocketStrike = null;
     let apiKey = localStorage.getItem('btcApiKey') || '';
     let name = localStorage.getItem('btcName') || '';
     function apiHeaders() { return apiKey ? { 'X-API-Key': apiKey } : {}; }
@@ -228,6 +246,47 @@
         },
         options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { min: 0, max: 1, ticks: { callback: v => Math.round(v * 100) + '%' } }, x: { display: false } } }
       });
+    }
+    function toRocketData(hist) {
+      let last = -Infinity;
+      const out = [];
+      for (const e of hist) {
+        const t = Math.floor(e[0]);
+        if (t <= last) continue;
+        last = t;
+        out.push({ time: t, value: e[1] });
+      }
+      return out;
+    }
+    function initRocketChart() {
+      if (typeof LightweightCharts === 'undefined') return;
+      const el = document.getElementById('rocket-chart');
+      rocketChart = LightweightCharts.createChart(el, {
+        layout: { background: { type: 'solid', color: 'transparent' }, textColor: '#64748b' },
+        grid: { vertLines: { visible: false }, horzLines: { color: 'rgba(255,255,255,0.03)' } },
+        rightPriceScale: { borderVisible: false, scaleMargins: { top: 0.2, bottom: 0.2 } },
+        timeScale: { borderVisible: false, timeVisible: true, secondsVisible: true, rightOffset: 8 },
+      });
+      rocketBaseline = rocketChart.addSeries(LightweightCharts.BaselineSeries, {
+        baseValue: { type: 'price', price: 0 },
+        topLineColor: '#00f59b', topFillColor1: 'rgba(0,245,155,0.25)', topFillColor2: 'rgba(0,245,155,0.0)',
+        bottomLineColor: '#ff3b69', bottomFillColor1: 'rgba(255,59,105,0.0)', bottomFillColor2: 'rgba(255,59,105,0.25)',
+        lineWidth: 3, lineType: 2, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+      });
+      rocketModelSeries = rocketChart.addSeries(LightweightCharts.LineSeries, {
+        color: 'rgba(56,189,248,0.7)', lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dashed,
+        priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+      });
+    }
+    function updateRocketTimer() {
+      const nowSec = Math.floor(Date.now() / 1000);
+      const winEnd = (Math.floor(nowSec / 900) + 1) * 900;
+      const rem = winEnd - nowSec;
+      const m = String(Math.floor(rem / 60)).padStart(2, '0');
+      const s = String(rem % 60).padStart(2, '0');
+      const el = document.getElementById('rocket-timer');
+      el.textContent = m + ':' + s;
+      el.className = 'pill bg-gray-800 font-mono ' + (rem <= 30 ? 'text-red-400' : (rem <= 120 ? 'text-amber-400' : 'text-amber-400'));
     }
     function pctBar(p, color) {
       if (p == null || isNaN(p)) return '<div class="text-gray-500">--</div>';
@@ -339,6 +398,32 @@
         probChart.update();
       }
 
+      if (rocketBaseline) {
+        const hist = s.price_history || [];
+        const data = toRocketData(hist);
+        const strike = s.open_strike != null ? s.open_strike : (hist.length ? hist[hist.length - 1][1] : null);
+        if (data.length) {
+          if (strike != null && strike !== rocketStrike) {
+            rocketStrike = strike;
+            rocketBaseline.applyOptions({ baseValue: { type: 'price', price: strike } });
+            document.getElementById('rocket-strike').textContent = '$' + Number(strike).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+          }
+          rocketBaseline.setData(data);
+          const probUp = s.kalshi_market && s.kalshi_market.prob_up;
+          if (probUp != null && strike != null) {
+            const fair = strike + (probUp - 0.5) * 120;
+            rocketModelSeries.setData(data.map(d => ({ time: d.time, value: fair })));
+            document.getElementById('rocket-prob').textContent = (probUp * 100).toFixed(0) + '%';
+          }
+          const lastPrice = hist[hist.length - 1][1];
+          const dist = strike != null ? lastPrice - strike : 0;
+          const dEl = document.getElementById('rocket-delta');
+          dEl.textContent = (dist >= 0 ? '▲ UP ' : '▼ DOWN ') + (dist >= 0 ? '+' : '-') + '$' + Math.abs(dist).toFixed(2);
+          dEl.style.color = dist >= 0 ? '#00f59b' : '#ff3b69';
+        }
+        updateRocketTimer();
+      }
+
       const cd = s.window_countdowns || {};
       const winTotals = { '5m': 300, '15m': 900, '1d': 86400 };
       document.getElementById('countdowns').innerHTML = Object.keys(cd).map(k => {
@@ -436,8 +521,11 @@
     initChart();
     initPriceChart();
     initProbChart();
+    initRocketChart();
+    updateRocketTimer();
     poll();
     setInterval(poll, 1000);
+    setInterval(updateRocketTimer, 1000);
   </script>
 </body>
 </html>

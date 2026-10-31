@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -17,6 +17,7 @@ from btc_edge.execution.alerts import TelegramAlerter, build_alerter
 from btc_edge.execution.audit import AuditLog
 from btc_edge.execution.killswitch import KillSwitch
 from btc_edge.ml.ai_assistant import AIAssistant, build_assistant
+from btc_edge.ml.strategy_registry import Registry
 
 app = FastAPI(title="BTC-Edge Dashboard")
 
@@ -107,6 +108,7 @@ _audit = AuditLog()
 _killswitch = KillSwitch(_settings.safety.kill_switch_file)
 _alerter: TelegramAlerter = build_alerter(_settings)
 _assistant: AIAssistant = build_assistant(_settings)
+_registry: Registry = Registry()
 _boot_ts = time.time()
 
 
@@ -207,6 +209,50 @@ def news() -> JSONResponse:
         "sentiment": engine_state.news_sentiment,
         "headlines": engine_state.news_headlines,
     })
+
+
+@app.get("/api/btc-15m/telemetry", dependencies=[Depends(require_auth)])
+def btc_15m_telemetry() -> JSONResponse:
+    """Current 15m window state + Champion/Challenger gate scorecard."""
+    telemetry = _registry.telemetry()
+    return JSONResponse({
+        "window_start_sec": int(time.time() // 900) * 900,
+        "window_end_sec": int(time.time() // 900) * 900 + 900,
+        "strike_price": engine_state.open_strike,
+        "current_price": engine_state.btc_price,
+        "champion_version_id": telemetry["champion_version_id"],
+        "champion_prob_up": engine_state.kalshi_market.get("prob_up"),
+        "orderbook_imbalance": engine_state.brti_60s,
+        "latest_news_signal": engine_state.news_sentiment,
+        "oos_window_count": telemetry["oos_window_count"],
+        "last_result": telemetry["last_result"],
+    })
+
+
+@app.post("/api/btc-15m/gate/evaluate", dependencies=[Depends(require_auth)])
+async def btc_15m_gate_evaluate(request: Request) -> JSONResponse:
+    """Run a proposed Challenger config through the promotion gate."""
+    payload = await request.json()
+    version_id = str(payload.get("version_id") or f"challenger-{int(time.time())}")
+    config = payload.get("config") or {}
+    if not isinstance(config, dict):
+        return JSONResponse({"error": "config must be a mapping of feature -> weight"}, status_code=400)
+
+    result = _registry.evaluate_challenger(version_id, {str(k): float(v) for k, v in config.items()})
+
+    # Best-effort persistence (never crash the endpoint on a DB hiccup).
+    try:
+        from btc_edge.db.session import Database
+        from btc_edge.ml.strategy_registry import save_registry
+
+        db = Database(_settings.db_path)
+        save_registry(db.session(), _registry)
+        db.close()
+    except Exception:  # noqa: BLE001 - persistence is best-effort
+        pass
+
+    return JSONResponse(result)
+
 
 
 @app.post("/api/assistant", dependencies=[Depends(require_auth)])
