@@ -73,8 +73,9 @@ def test_market_maker_kalshi_buy_only():
     strat = MarketMakerStrategy()
     ctx = make_context(venue="kalshi", time_remaining=200.0, contract_price=0.50, regime="DAMPENING")
     decisions = strat.evaluate(ctx)
-    assert len(decisions) == 3  # 3 bids only (Kalshi: sell-YES needs margin the account can't post)
+    assert len(decisions) == 3  # 3 taker buys (Kalshi: GTC maker needs USDC margin)
     assert all(d.action == "buy" for d in decisions)
+    assert all(d.order_type == "taker" for d in decisions)
 
 
 def test_market_maker_inactive_early():

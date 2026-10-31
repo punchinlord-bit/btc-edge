@@ -57,27 +57,41 @@ class MarketMakerStrategy(Strategy):
 
         self._last_quote_ts[venue] = time.time()
 
-        # Buy around the market mid on a 1-cent grid. On Kalshi, quote ONLY the bid
-        # (buy YES) side — verified that "sell YES" (short) returns `insufficient_balance`
-        # because it needs USDC margin the account can't post, while "buy YES" pays in
-        # USD and is accepted. Polymarket US supports both legs, so keep both there.
+        # Buy the YES side. On Kalshi we must be a TAKER (buy at the ask, IOC) —
+        # maker/GTC orders rest on the book and need USDC margin, which returns
+        # `insufficient_balance`; taker orders fill immediately and pay in USD.
+        # Polymarket US supports resting maker orders on both legs, so keep those.
         fair = ctx.contract_price
         decisions: list[StrategyDecision] = []
         for lvl in range(self.levels):
-            bid_price = max(0.01, round(fair - (lvl + 1) * (spread / 2.0), 2))
-            decisions.append(StrategyDecision(
-                strategy=self.name,
-                side="up",
-                action="buy",
-                price=bid_price,
-                size=5.0,
-                order_type="maker",
-                reason=f"bid level {lvl + 1}",
-                prob_estimate=fair,
-                ev_estimate=fair - bid_price,
-                rule_snapshot=snapshot,
-            ))
-            if venue != "kalshi":
+            if venue == "kalshi":
+                buy_price = min(0.99, round(fair + (lvl + 1) * (spread / 2.0), 2))
+                decisions.append(StrategyDecision(
+                    strategy=self.name,
+                    side="up",
+                    action="buy",
+                    price=buy_price,
+                    size=5.0,
+                    order_type="taker",
+                    reason=f"taker buy level {lvl + 1}",
+                    prob_estimate=fair,
+                    ev_estimate=fair - buy_price,
+                    rule_snapshot=snapshot,
+                ))
+            else:
+                bid_price = max(0.01, round(fair - (lvl + 1) * (spread / 2.0), 2))
+                decisions.append(StrategyDecision(
+                    strategy=self.name,
+                    side="up",
+                    action="buy",
+                    price=bid_price,
+                    size=5.0,
+                    order_type="maker",
+                    reason=f"bid level {lvl + 1}",
+                    prob_estimate=fair,
+                    ev_estimate=fair - bid_price,
+                    rule_snapshot=snapshot,
+                ))
                 ask_price = min(0.99, round(fair + (lvl + 1) * (spread / 2.0), 2))
                 decisions.append(StrategyDecision(
                     strategy=self.name,
