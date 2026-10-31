@@ -195,6 +195,28 @@
   </section>
 
   <section class="card mb-6">
+    <div class="widget-title"><span>🧭</span> Strategy Guide <span class="normal-case text-gray-500 font-normal">(what each model does autonomously)</span></div>
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+      <div class="p-3 rounded-lg bg-gray-900/50 border border-gray-800">
+        <div class="font-semibold text-amber-300">⚡ late_scalp</div>
+        <p class="text-gray-400 text-xs mt-1">Scalps the final seconds when the contract is near-certain (93–98%) and the window has already moved its way — sells into certainty for a small, low-risk edge.</p>
+      </div>
+      <div class="p-3 rounded-lg bg-gray-900/50 border border-gray-800">
+        <div class="font-semibold text-cyan-300">📊 market_maker</div>
+        <p class="text-gray-400 text-xs mt-1">Quotes a bid and ask around the market mid every cycle (3 levels) and earns the spread. The hedged base that keeps the bot always active.</p>
+      </div>
+      <div class="p-3 rounded-lg bg-gray-900/50 border border-gray-800">
+        <div class="font-semibold text-emerald-300">👥 crowd_follow</div>
+        <p class="text-gray-400 text-xs mt-1">In the final 5 minutes, rides a breakout when price momentum, orderbook imbalance and acceleration all confirm the same direction.</p>
+      </div>
+      <div class="p-3 rounded-lg bg-gray-900/50 border border-gray-800">
+        <div class="font-semibold text-violet-300">🎯 iv_mispricing</div>
+        <p class="text-gray-400 text-xs mt-1">Arbitrages the gap between the options-implied probability (Deribit vol) and the market price, entering only when orderflow confirms.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="card mb-6">
     <div class="widget-title"><span>📦</span> Open Positions <span class="normal-case text-gray-500 font-normal">(live exchange data)</span></div>
     <div id="open-positions" class="text-sm text-gray-400">--</div>
   </section>
