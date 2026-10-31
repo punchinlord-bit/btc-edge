@@ -34,9 +34,19 @@ services:
         sync: false
       - key: KALSHI_USE_DEMO
         value: "true"
-      - key: POLYMARKET_WALLET
+      # Polymarket US (polymarket.us) — Key ID + Secret Key (NOT an EVM wallet).
+      - key: POLYMARKET_API_KEY_ID
         sync: false
-      - key: POLYMARKET_PRIVATE_KEY
+      - key: POLYMARKET_API_SECRET
+        sync: false
+      # ---- Operators (optional; armed via the dashboard) ----
+      - key: OP1_KALSHI_KEY_ID
+        sync: false
+      - key: OP1_POLY_WALLET
+        sync: false
+      - key: OP2_KALSHI_KEY_ID
+        sync: false
+      - key: OP2_POLY_WALLET
         sync: false
     disk:
       name: btc-edge-data
