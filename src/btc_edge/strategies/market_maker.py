@@ -58,12 +58,14 @@ class MarketMakerStrategy(Strategy):
         self._last_quote_ts[venue] = time.time()
 
         # Quote around the *market* mid (contract_price), snapped to the 1-cent tick
-        # grid, so orders are both on-grid and near the current market.
+        # grid, so orders are both on-grid and near the current market. We only quote
+        # the BID (buy) side: a small balance cannot SHORT without posting margin,
+        # which Kalshi rejects with `insufficient_balance`. Positions close at
+        # window settlement, so the ask (take-profit) leg is unnecessary here.
         fair = ctx.contract_price
         decisions: list[StrategyDecision] = []
         for lvl in range(self.levels):
             bid_price = max(0.01, round(fair - (lvl + 1) * (spread / 2.0), 2))
-            ask_price = min(0.99, round(fair + (lvl + 1) * (spread / 2.0), 2))
             decisions.append(StrategyDecision(
                 strategy=self.name,
                 side="up",
@@ -74,18 +76,6 @@ class MarketMakerStrategy(Strategy):
                 reason=f"post-only bid level {lvl + 1}",
                 prob_estimate=fair,
                 ev_estimate=fair - bid_price,
-                rule_snapshot=snapshot,
-            ))
-            decisions.append(StrategyDecision(
-                strategy=self.name,
-                side="up",
-                action="sell",
-                price=ask_price,
-                size=5.0,
-                order_type="maker",
-                reason=f"post-only ask level {lvl + 1}",
-                prob_estimate=fair,
-                ev_estimate=ask_price - fair,
                 rule_snapshot=snapshot,
             ))
         return decisions

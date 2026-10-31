@@ -65,8 +65,9 @@ def test_market_maker_quotes_three_levels():
     strat = MarketMakerStrategy()
     ctx = make_context(time_remaining=200.0, prob_estimate=0.50, regime="DAMPENING")
     decisions = strat.evaluate(ctx)
-    assert len(decisions) == 6  # 3 bids + 3 asks
+    assert len(decisions) == 3  # 3 bids only (no asks: cannot short without margin)
     assert all(d.order_type == "maker" for d in decisions)
+    assert all(d.action == "buy" for d in decisions)
 
 
 def test_market_maker_inactive_early():
