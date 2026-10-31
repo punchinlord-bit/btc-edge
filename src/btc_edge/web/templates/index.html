@@ -30,7 +30,7 @@
     </div>
     <div class="flex items-center gap-2 flex-wrap">
       <span id="engine-status" class="pill bg-gray-700">⏳ checking…</span>
-      <span id="mode-badge" class="pill bg-gray-700">paper</span>
+      <span id="mode-badge" class="pill bg-red-700">🔴 LIVE</span>
       <span id="trade-only" class="pill bg-gray-700">🔐 trade-only</span>
     </div>
   </header>
@@ -38,7 +38,7 @@
   <section class="mb-6">
     <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
       <div class="card border-indigo-700/40">
-        <div class="widget-title"><span>🧿</span> Kalshi Wallet</div>
+        <div class="widget-title"><span>💰</span> Kalshi Wallet <span>💵</span></div>
         <div class="stat-big text-indigo-300" id="wallet-kalshi-balance">--</div>
         <div class="text-xs text-gray-400 mt-1">balance</div>
         <div class="mt-3 flex justify-between text-sm">
@@ -48,7 +48,7 @@
         <div class="mt-1 text-xs text-gray-400">Win <b id="wallet-kalshi-win" class="text-green-400">0%</b> · Loss <b id="wallet-kalshi-loss" class="text-red-400">0%</b></div>
       </div>
       <div class="card border-purple-700/40">
-        <div class="widget-title"><span>🎯</span> Polymarket Wallet</div>
+        <div class="widget-title"><span>💵</span> Polymarket Wallet <span>🏦</span></div>
         <div class="stat-big text-purple-300" id="wallet-poly-balance">--</div>
         <div class="text-xs text-gray-400 mt-1">balance</div>
         <div class="mt-3 flex justify-between text-sm">
@@ -58,7 +58,7 @@
         <div class="mt-1 text-xs text-gray-400">Win <b id="wallet-poly-win" class="text-green-400">0%</b> · Loss <b id="wallet-poly-loss" class="text-red-400">0%</b></div>
       </div>
       <div class="card border-emerald-700/40">
-        <div class="widget-title"><span>💰</span> Total Wallet</div>
+        <div class="widget-title"><span>🏦</span> Total Wallet <span>🤑</span></div>
         <div class="stat-big text-emerald-300" id="wallet-total-bankroll">--</div>
         <div class="text-xs text-gray-400 mt-1">live balance (Kalshi + Polymarket)</div>
         <div class="mt-3 flex justify-between text-sm">
@@ -367,8 +367,8 @@
 
     function render(s) {
       document.getElementById('greeting').textContent = greeting();
-      document.getElementById('mode-badge').textContent = s.mode;
-      document.getElementById('mode-badge').className = 'pill ' + (s.mode === 'live' ? 'bg-red-700' : 'bg-gray-700');
+      document.getElementById('mode-badge').textContent = s.mode === 'live' ? '🔴 LIVE 💰' : '⚪ PAPER';
+      document.getElementById('mode-badge').className = 'pill ' + (s.mode === 'live' ? 'bg-red-700 text-white' : 'bg-gray-700');
       document.getElementById('trade-only').className = 'pill ' + (s.trade_only_keys ? 'bg-emerald-900 text-emerald-300' : 'bg-red-900 text-red-300');
       document.getElementById('trade-only').textContent = s.trade_only_keys ? '🔐 trade-only ✓' : '⚠️ withdrawal possible';
 

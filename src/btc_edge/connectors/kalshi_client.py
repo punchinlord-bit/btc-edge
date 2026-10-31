@@ -273,9 +273,8 @@ class KalshiClient:
             "count": str(count),
             "price": f"{yes_price:.4f}",
             "time_in_force": "good_till_canceled" if order_type == "limit" else "immediate_or_cancel",
-            "self_trade_prevention_type": "maker",
+            "self_trade_prevention_type": "taker_at_cross",
             "client_order_id": _client_order_id(ticker, side, action, count, price),
-            "post_only": bool(post_only),
         }
         return await self._request("POST", "/portfolio/events/orders", json_body=body)
 
