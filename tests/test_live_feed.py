@@ -12,8 +12,9 @@ def test_compute_countdowns_boundaries():
     cd = compute_countdowns(now=0.0)
     assert cd["5m"] == 300.0
     assert cd["15m"] == 900.0
+    assert cd["1d"] == 86400.0
 
-    # 150s into the 5m window -> 150s remaining; 15m windows are independent.
+    # 150s into the 5m window -> 150s remaining; 15m/1d windows are independent.
     cd2 = compute_countdowns(now=150.0)
     assert cd2["5m"] == 150.0
 
@@ -52,7 +53,7 @@ def test_refresh_once_populates_state(monkeypatch):
     assert state.polymarket_markets["5m"]["prob_up"] == 0.55
     assert state.kalshi_market["prob_up"] == 0.6
     assert len(state.price_history) == 1
-    assert set(state.window_countdowns) == {"5m", "15m"}
+    assert set(state.window_countdowns) == {"5m", "15m", "1d"}
     assert state.feed_updated_at > 0
 
 
@@ -71,4 +72,4 @@ def test_refresh_once_swallows_fetch_errors(monkeypatch):
     asyncio.run(feed.refresh_once())
 
     assert state.btc_price is None
-    assert set(state.window_countdowns) == {"5m", "15m"}
+    assert set(state.window_countdowns) == {"5m", "15m", "1d"}

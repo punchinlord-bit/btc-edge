@@ -151,12 +151,15 @@ class Router:
         size: float,
         is_maker: bool,
         token_id: str | None = None,
+        kalshi_ticker: str | None = None,
     ) -> None:
         """Submit a real order to the exchange (awaited async)."""
         if venue == "kalshi" and self.kalshi_client is not None:
+            # "up" -> buy YES on the above-strike market; "down" -> buy NO on it
+            # (equivalent to YES on the below-strike market).
             side = "yes" if decision.side == "up" else "no"
             await self.kalshi_client.place_order(
-                ticker=self.settings.kalshi.market_ticker,
+                ticker=kalshi_ticker or self.settings.kalshi.market_ticker,
                 side=side,
                 action=decision.action,
                 count=max(1, int(round(size))),

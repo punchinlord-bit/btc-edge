@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 TRADING_WINDOWS: tuple[tuple[int, str, str], ...] = (
     (300, "polymarket", "5m"),
     (900, "polymarket", "15m"),
-    (900, "kalshi", "15m"),
+    (86400, "kalshi", "1d"),  # Kalshi BTC markets are DAILY above/below-strike binaries
 )
 IMPLIED_VOL_DEFAULT = 0.5  # annualized BTC IV proxy when Deribit DVOL is unavailable
 FEED_SAMPLE_HZ = 1.0 / 3.0  # live feed polls ~every 3s
@@ -219,7 +219,15 @@ class TradingLoop:
 
         if venue == "kalshi":
             kal = self.state.kalshi_market or {}
-            contract_price = float(kal.get("prob_up") or kal.get("last_price") or 0.5)
+            contract_price = float(kal.get("prob_up") or 0.5)
+            # Kalshi is a DAILY above/below-strike binary: the reference is the
+            # fixed strike, and time_remaining is time until the market closes.
+            strike = kal.get("strike")
+            if strike is not None:
+                open_price = float(strike)
+            close_ts = kal.get("close_time")
+            if close_ts is not None:
+                time_remaining = max(0.0, float(close_ts) - now)
         else:
             pm = self.state.polymarket_markets.get(label, {})
             contract_price = float(pm.get("prob_up") or pm.get("up") or 0.5)
@@ -310,9 +318,12 @@ class TradingLoop:
             # Place a REAL order on the exchange when live trading is enabled.
             if self.router.live_allowed:
                 token = up_token if d.side == "up" else down_token
+                kal = self.state.kalshi_market or {}
                 try:
                     await self.router.place_order_async(
-                        venue, d, d.price, size, is_maker, token_id=token
+                        venue, d, d.price, size, is_maker,
+                        token_id=token,
+                        kalshi_ticker=kal.get("ticker") if venue == "kalshi" else None,
                     )
                 except Exception as exc:  # noqa: BLE001 - never crash the loop
                     logger.warning("live order placement error (%s): %s", venue, exc)

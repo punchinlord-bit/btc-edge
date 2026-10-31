@@ -211,6 +211,10 @@
     }
     function fmtCountdown(sec) {
       sec = Math.max(0, Math.round(sec));
+      if (sec >= 3600) {
+        const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60);
+        return h + 'h ' + m + 'm';
+      }
       const m = Math.floor(sec / 60), s = sec % 60;
       return m + ':' + String(s).padStart(2, '0');
     }
@@ -288,7 +292,7 @@
       document.getElementById('kalshi-meter').innerHTML = '<div class="flex justify-between text-xs text-gray-400 mb-1"><span>Yes</span><span class="text-green-400">' + (yes != null ? yes.toFixed(0) + '%' : '--') + '</span></div>' + pctBar(kal.prob_up, 'bg-blue-500') + '<div class="text-xs text-gray-500 mt-1">No ' + (yes != null ? (100 - yes).toFixed(0) : '--') + '%</div>';
 
       const cd = s.window_countdowns || {};
-      const winTotals = { '5m': 300, '15m': 900 };
+      const winTotals = { '5m': 300, '15m': 900, '1d': 86400 };
       document.getElementById('countdowns').innerHTML = Object.keys(cd).map(k => {
         const total = winTotals[k] || 300;
         const remaining = cd[k];

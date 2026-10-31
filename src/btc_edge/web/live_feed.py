@@ -24,7 +24,7 @@ from btc_edge.web.app import EngineState
 logger = logging.getLogger(__name__)
 
 COINBASE_SPOT_URL = "https://api.coinbase.com/v2/prices/BTC-USD/spot"
-TIMEFRAMES: tuple[tuple[int, str], ...] = ((300, "5m"), (900, "15m"))
+TIMEFRAMES: tuple[tuple[int, str], ...] = ((300, "5m"), (900, "15m"), (86400, "1d"))
 MAX_HISTORY_POINTS = 240
 
 
@@ -108,27 +108,42 @@ class LiveMarketFeed:
         return out
 
     async def fetch_kalshi(self) -> dict[str, Any]:
-        from btc_edge.connectors.kalshi_client import KalshiClient
+        from datetime import datetime
+
+        from btc_edge.connectors.kalshi_client import KalshiClient, resolve_btc_markets
 
         client = KalshiClient(signer=None, base_url=self.kalshi_base_url)
-        data = await client.get_markets(ticker=self.kalshi_ticker)
-        markets = data.get("markets", [])
-        if not markets:
+        markets = await client.get_btc_markets()
+        btc = self.state.btc_price
+        if not markets or btc is None:
             return {}
-        m = markets[0]
-        yes_bid = to_probability(m.get("yes_bid"))
-        yes_ask = to_probability(m.get("yes_ask"))
-        last = to_probability(m.get("last_price"))
-        prob: float | None = None
-        if yes_bid is not None and yes_ask is not None:
-            prob = (yes_bid + yes_ask) / 2.0
-        elif last is not None:
-            prob = last
+
+        above, below = resolve_btc_markets(markets, btc)
+        if above is None:
+            return {}
+
+        def mid(m: dict[str, Any]) -> float | None:
+            bid = to_probability(m.get("yes_bid_dollars"))
+            ask = to_probability(m.get("yes_ask_dollars"))
+            if bid is not None and ask is not None:
+                return (bid + ask) / 2.0
+            return to_probability(m.get("last_price_dollars"))
+
+        close_ts: float | None = None
+        close = above.get("close_time")
+        if close:
+            try:
+                close_ts = datetime.fromisoformat(str(close).replace("Z", "+00:00")).timestamp()
+            except (ValueError, TypeError):
+                close_ts = None
+
         return {
-            "last_price": last,
-            "yes_bid": yes_bid,
-            "yes_ask": yes_ask,
-            "prob_up": prob,
+            "ticker": above.get("ticker"),
+            "strike": above.get("floor_strike"),
+            "prob_up": mid(above),
+            "prob_down": mid(below) if below else None,
+            "below_ticker": below.get("ticker") if below else None,
+            "close_time": close_ts,
         }
 
     async def refresh_once(self) -> None:

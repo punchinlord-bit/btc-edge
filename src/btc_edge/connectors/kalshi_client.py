@@ -228,6 +228,13 @@ class KalshiClient:
             params["status"] = status
         return await self._request("GET", "/markets", params=params)
 
+    async def get_btc_markets(self) -> list[dict[str, Any]]:
+        """Fetch the full KXBTC series (daily above/below price-range markets)."""
+        data = await self._request(
+            "GET", "/markets", params={"series_ticker": "KXBTC", "limit": 200}
+        )
+        return data.get("markets", []) if isinstance(data, dict) else []
+
     async def get_orderbook(self, ticker: str) -> dict[str, Any]:
         return await self._request("GET", f"/markets/{ticker}/orderbook")
 
@@ -387,5 +394,51 @@ def build_kalshi_signer_from_env() -> KalshiSigner | None:
     if not key_id or not private:
         return None
     return KalshiSigner(key_id, private)
+
+
+def resolve_btc_markets(
+    markets: list[dict[str, Any]], current_price: float, now_ts: float | None = None
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """Pick the nearest "above" (``strike_type == "greater"``) and "below"
+    (``strike_type == "less"``) BTC price-range markets to ``current_price``,
+    skipping any market whose ``close_time`` has already passed.
+
+    Returns ``(above_market, below_market)`` — either may be ``None``.
+    """
+    from datetime import datetime
+
+    now = now_ts if now_ts is not None else time.time()
+    above: dict[str, Any] | None = None
+    below: dict[str, Any] | None = None
+    for m in markets:
+        stype = m.get("strike_type")
+        strike = m.get("floor_strike") if stype == "greater" else m.get("cap_strike")
+        if strike is None:
+            continue
+        strike = float(strike)
+
+        # Skip markets that have already closed/settled.
+        status = (m.get("status") or "").lower()
+        if status in {"closed", "finalized", "settled"}:
+            continue
+
+        close = m.get("close_time")
+        if close:
+            try:
+                close_ts = datetime.fromisoformat(str(close).replace("Z", "+00:00")).timestamp()
+                if close_ts < now:
+                    continue
+            except (ValueError, TypeError):
+                pass
+
+        if stype == "greater":
+            ref = float(above.get("floor_strike") or 0) if above else None
+            if above is None or (ref is not None and abs(strike - current_price) < abs(ref - current_price)):
+                above = m
+        elif stype == "less":
+            ref = float(below.get("cap_strike") or 0) if below else None
+            if below is None or (ref is not None and abs(strike - current_price) < abs(ref - current_price)):
+                below = m
+    return above, below
 
 
