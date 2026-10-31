@@ -44,6 +44,7 @@
           <span class="text-gray-400">P&amp;L <b id="wallet-kalshi-pnl" class="text-gray-300">$0.00</b></span>
           <span class="text-gray-400"><b id="wallet-kalshi-trades">0</b> trades</span>
         </div>
+        <div class="mt-1 text-xs text-gray-400">Win <b id="wallet-kalshi-win" class="text-green-400">0%</b> · Loss <b id="wallet-kalshi-loss" class="text-red-400">0%</b></div>
       </div>
       <div class="card border-purple-700/40">
         <div class="widget-title"><span>🎯</span> Polymarket Wallet</div>
@@ -53,6 +54,7 @@
           <span class="text-gray-400">P&amp;L <b id="wallet-poly-pnl" class="text-gray-300">$0.00</b></span>
           <span class="text-gray-400"><b id="wallet-poly-trades">0</b> trades</span>
         </div>
+        <div class="mt-1 text-xs text-gray-400">Win <b id="wallet-poly-win" class="text-green-400">0%</b> · Loss <b id="wallet-poly-loss" class="text-red-400">0%</b></div>
       </div>
       <div class="card border-emerald-700/40">
         <div class="widget-title"><span>💰</span> Paper Bankroll</div>
@@ -110,7 +112,7 @@
       <table class="w-full text-sm">
         <thead>
           <tr class="text-gray-400 border-b border-gray-700">
-            <th class="text-left py-1">Strategy</th><th class="text-right">Net EV</th><th class="text-right">Win</th><th class="text-right">Notional</th><th class="text-right">P&amp;L</th>
+            <th class="text-left py-1">Strategy</th><th class="text-right">Net EV</th><th class="text-right">Win / Loss</th><th class="text-right">Notional</th><th class="text-right">P&amp;L</th>
           </tr>
         </thead>
         <tbody id="strategy-table"></tbody>
@@ -241,6 +243,12 @@
       pp.textContent = signedMoney(pm.pnl_usd); pp.className = pnlClass(pm.pnl_usd || 0);
       document.getElementById('wallet-kalshi-trades').textContent = k.trades || 0;
       document.getElementById('wallet-poly-trades').textContent = pm.trades || 0;
+      const kw = k.wins || 0, kl = k.losses || 0, ktot = kw + kl;
+      document.getElementById('wallet-kalshi-win').textContent = (ktot > 0 ? Math.round(kw / ktot * 100) : 0) + '%';
+      document.getElementById('wallet-kalshi-loss').textContent = (ktot > 0 ? Math.round(kl / ktot * 100) : 0) + '%';
+      const pw = pm.wins || 0, pl = pm.losses || 0, ptot = pw + pl;
+      document.getElementById('wallet-poly-win').textContent = (ptot > 0 ? Math.round(pw / ptot * 100) : 0) + '%';
+      document.getElementById('wallet-poly-loss').textContent = (ptot > 0 ? Math.round(pl / ptot * 100) : 0) + '%';
       document.getElementById('wallet-total-bankroll').textContent = money(s.risk && s.risk.bankroll != null ? s.risk.bankroll : 100);
       const tp = document.getElementById('wallet-total-pnl');
       const totalPnl = Number((s.trade_totals || {}).total_pnl_usd || 0);
@@ -307,7 +315,10 @@
 
       document.getElementById('strategy-table').innerHTML = Object.entries(s.strategy_metrics || {}).map(([nm, m]) => {
         const p = m.pnl_usd ?? 0;
-        return '<tr class="border-b border-gray-800"><td class="py-1">' + nm + '</td><td class="text-right">' + (m.net_ev ?? 0).toFixed(4) + '</td><td class="text-right">' + ((m.win_rate ?? 0) * 100).toFixed(0) + '%</td><td class="text-right">$' + (m.notional_usd ?? 0).toFixed(2) + '</td><td class="text-right ' + pnlClass(p) + '">' + signedMoney(p) + '</td></tr>';
+        const w = m.wins ?? 0, l = m.losses ?? 0, tot = w + l;
+        const wp = tot > 0 ? Math.round(w / tot * 100) : 0;
+        const lp = tot > 0 ? Math.round(l / tot * 100) : 0;
+        return '<tr class="border-b border-gray-800"><td class="py-1">' + nm + '</td><td class="text-right">' + (m.net_ev ?? 0).toFixed(4) + '</td><td class="text-right"><span class="text-green-400">' + wp + '%</span> <span class="text-gray-500">/</span> <span class="text-red-400">' + lp + '%</span></td><td class="text-right">$' + (m.notional_usd ?? 0).toFixed(2) + '</td><td class="text-right ' + pnlClass(p) + '">' + signedMoney(p) + '</td></tr>';
       }).join('') || '<tr><td colspan="5" class="text-gray-500">--</td></tr>';
 
       const tt = s.trade_totals || {};

@@ -88,6 +88,7 @@ class TradingLoop:
                 "win_rate": 0.0,
                 "trades": 0,
                 "wins": 0,
+                "losses": 0,
                 "notional_usd": 0.0,
                 "pnl_usd": 0.0,
                 "fees_usd": 0.0,
@@ -96,7 +97,7 @@ class TradingLoop:
         }
         self._recent_trades: list[dict[str, Any]] = []
         self._venue_stats: dict[str, dict[str, Any]] = {
-            v: {"notional_usd": 0.0, "pnl_usd": 0.0, "trades": 0}
+            v: {"notional_usd": 0.0, "pnl_usd": 0.0, "trades": 0, "wins": 0, "losses": 0}
             for v in ("polymarket", "kalshi")
         }
 
@@ -183,9 +184,13 @@ class TradingLoop:
             pnl += trade_pnl
             m = self._metrics[pos["strategy"]]
             m["wins"] += 1 if trade_pnl > 0 else 0
+            m["losses"] += 1 if trade_pnl < 0 else 0
             m["pnl_usd"] += trade_pnl
             if m["trades"]:
                 m["win_rate"] = m["wins"] / m["trades"]
+            vs = self._venue_stats[venue]
+            vs["wins"] += 1 if trade_pnl > 0 else 0
+            vs["losses"] += 1 if trade_pnl < 0 else 0
             self._recent_trades.append({
                 "ts": time.time(),
                 "tf": tf,
