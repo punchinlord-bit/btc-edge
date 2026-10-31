@@ -63,6 +63,8 @@ class EngineState:
         self.polymarket_markets: dict[str, dict[str, Any]] = {}
         self.kalshi_market: dict[str, Any] = {}
         self.feed_updated_at: float = 0.0
+        self.recent_trades: list[dict[str, Any]] = []
+        self.trade_totals: dict[str, float] = {}
         self.updated_at: float = time.time()
 
     def snapshot(self) -> dict[str, Any]:
@@ -84,6 +86,8 @@ class EngineState:
             "price_history": self.price_history,
             "polymarket_markets": self.polymarket_markets,
             "kalshi_market": self.kalshi_market,
+            "recent_trades": self.recent_trades,
+            "trade_totals": self.trade_totals,
             "feed_updated_at": self.feed_updated_at,
             "updated_at": self.updated_at,
         }
@@ -151,6 +155,7 @@ def overview() -> JSONResponse:
     tone = "bullish" if sentiment > 0.15 else ("bearish" if sentiment < -0.15 else "neutral")
     risk = engine_state.risk
     at_risk = risk.get("at_risk_usd", 0.0)
+    totals = engine_state.trade_totals
     return JSONResponse({
         "mode": engine_state.mode,
         "kill_switch": engine_state.kill_switch,
@@ -159,6 +164,10 @@ def overview() -> JSONResponse:
         "news_sentiment": sentiment,
         "at_risk_usd": at_risk,
         "signals": engine_state.signals,
+        "total_trades": totals.get("total_trades", 0),
+        "total_notional_usd": totals.get("total_notional_usd", 0.0),
+        "total_pnl_usd": totals.get("total_pnl_usd", 0.0),
+        "total_fees_usd": totals.get("total_fees_usd", 0.0),
         "advice": _advice_text(sentiment, engine_state.regime, engine_state.kill_switch),
     })
 

@@ -78,7 +78,7 @@
       <table class="w-full text-sm">
         <thead>
           <tr class="text-gray-400 border-b border-gray-700">
-            <th class="text-left py-1">Strategy</th><th class="text-right">Net EV</th><th class="text-right">Win Rate</th>
+            <th class="text-left py-1">Strategy</th><th class="text-right">Net EV</th><th class="text-right">Win Rate</th><th class="text-right">Notional $</th><th class="text-right">P&amp;L $</th>
           </tr>
         </thead>
         <tbody id="strategy-table"></tbody>
@@ -87,6 +87,29 @@
     <div class="card">
       <h2 class="text-sm uppercase tracking-wide text-gray-400 mb-2">Equity Curve</h2>
       <canvas id="equity-chart" height="180"></canvas>
+    </div>
+  </div>
+
+  <div class="card mb-6">
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="text-sm uppercase tracking-wide text-gray-400">Trade Activity (real $ amounts)</h2>
+      <span id="engine-status" class="px-3 py-1 rounded-full text-xs font-semibold bg-gray-700">checking…</span>
+    </div>
+    <div class="flex flex-wrap gap-3 text-sm mb-4">
+      <span class="px-3 py-1 rounded-full bg-gray-800">Trades: <b id="total-trades">0</b></span>
+      <span class="px-3 py-1 rounded-full bg-gray-800">Notional: <b id="total-notional">$0.00</b></span>
+      <span class="px-3 py-1 rounded-full bg-gray-800">P&amp;L: <b id="total-pnl" class="text-gray-300">$0.00</b></span>
+      <span class="px-3 py-1 rounded-full bg-gray-800">Fees: <b id="total-fees">$0.00</b></span>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="text-gray-400 border-b border-gray-700">
+            <th class="text-left py-1">Time</th><th class="text-left">Strategy</th><th class="text-left">Side</th><th class="text-right">Price</th><th class="text-right">Notional $</th><th class="text-right">P&amp;L $</th>
+          </tr>
+        </thead>
+        <tbody id="recent-trades"></tbody>
+      </table>
     </div>
   </div>
 
@@ -120,6 +143,19 @@
       if (apiKey) return;
       const k = prompt('Enter the dashboard API key (DASHBOARD_API_KEY):');
       if (k) { apiKey = k.trim(); localStorage.setItem('btcApiKey', apiKey); }
+    }
+    function toast(msg) {
+      let el = document.getElementById('toast');
+      if (!el) {
+        el = document.createElement('div');
+        el.id = 'toast';
+        el.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1f2937;color:#fff;padding:10px 20px;border-radius:10px;border:1px solid #374151;z-index:9999;font-weight:600;box-shadow:0 10px 25px rgba(0,0,0,.5);';
+        document.body.appendChild(el);
+      }
+      el.textContent = msg;
+      el.style.display = 'block';
+      clearTimeout(el._t);
+      el._t = setTimeout(() => { el.style.display = 'none'; }, 3000);
     }
     function initChart() {
       const ctx = document.getElementById('equity-chart').getContext('2d');
@@ -205,9 +241,48 @@
       }).join('') || '<div class="text-gray-500">--</div>';
 
       const tbody = document.getElementById('strategy-table');
-      tbody.innerHTML = Object.entries(s.strategy_metrics || {}).map(([name, m]) =>
-        `<tr class="border-b border-gray-800"><td class="py-1">${name}</td><td class="text-right">${(m.net_ev ?? 0).toFixed(4)}</td><td class="text-right">${((m.win_rate ?? 0) * 100).toFixed(1)}%</td></tr>`
-      ).join('') || '<tr><td colspan="3" class="text-gray-500">--</td></tr>';
+      tbody.innerHTML = Object.entries(s.strategy_metrics || {}).map(([name, m]) => {
+        const pnl = m.pnl_usd ?? 0;
+        const cls = pnl > 0 ? 'text-green-400' : (pnl < 0 ? 'text-red-400' : 'text-gray-300');
+        return `<tr class="border-b border-gray-800"><td class="py-1">${name}</td><td class="text-right">${(m.net_ev ?? 0).toFixed(4)}</td><td class="text-right">${((m.win_rate ?? 0) * 100).toFixed(1)}%</td><td class="text-right">$${(m.notional_usd ?? 0).toFixed(2)}</td><td class="text-right ${cls}">$${pnl.toFixed(2)}</td></tr>`;
+      }).join('') || '<tr><td colspan="5" class="text-gray-500">--</td></tr>';
+
+      // Trade totals.
+      const totals = s.trade_totals || {};
+      document.getElementById('total-trades').textContent = totals.total_trades ?? 0;
+      document.getElementById('total-notional').textContent = '$' + Number(totals.total_notional_usd ?? 0).toFixed(2);
+      const totalPnl = Number(totals.total_pnl_usd ?? 0);
+      const pnlEl = document.getElementById('total-pnl');
+      pnlEl.textContent = (totalPnl >= 0 ? '$' : '-$') + Math.abs(totalPnl).toFixed(2);
+      pnlEl.className = totalPnl > 0 ? 'text-green-400' : (totalPnl < 0 ? 'text-red-400' : 'text-gray-300');
+      document.getElementById('total-fees').textContent = '$' + Number(totals.total_fees_usd ?? 0).toFixed(2);
+
+      // Recent trades.
+      const rt = document.getElementById('recent-trades');
+      const trades = s.recent_trades || [];
+      rt.innerHTML = trades.slice().reverse().slice(0, 25).map(t => {
+        const p = t.pnl ?? 0;
+        const cls = p > 0 ? 'text-green-400' : (p < 0 ? 'text-red-400' : 'text-gray-300');
+        const when = t.ts ? new Date(t.ts * 1000).toLocaleTimeString() : '--';
+        return `<tr class="border-b border-gray-800">
+          <td class="py-1 text-gray-500">${when}</td>
+          <td>${t.strategy ?? ''}</td>
+          <td>${t.action ?? ''} ${t.side ?? ''}</td>
+          <td class="text-right">${(t.price ?? 0).toFixed(3)}</td>
+          <td class="text-right">$${(t.notional ?? 0).toFixed(2)}</td>
+          <td class="text-right ${cls}">${p >= 0 ? '$' : '-$'}${Math.abs(p).toFixed(2)}</td>
+        </tr>`;
+      }).join('') || '<tr><td colspan="6" class="text-gray-500 py-2">No trades settled yet — waiting for a window to close.</td></tr>';
+
+      // Engine status badge.
+      const statusEl = document.getElementById('engine-status');
+      if (s.kill_switch) {
+        statusEl.textContent = 'HALTED';
+        statusEl.className = 'px-3 py-1 rounded-full text-xs font-semibold bg-red-900 text-red-300';
+      } else {
+        statusEl.textContent = s.mode === 'live' ? 'RUNNING (live)' : 'RUNNING (paper)';
+        statusEl.className = 'px-3 py-1 rounded-full text-xs font-semibold bg-emerald-900 text-emerald-300';
+      }
 
       if (chart) {
         const eq = s.equity_curve || [];
@@ -236,12 +311,16 @@
 
     document.getElementById('halt-btn').addEventListener('click', async () => {
       ensureKey();
-      await fetch('/api/halt', { method: 'POST', headers: apiHeaders() });
+      const r = await fetch('/api/halt', { method: 'POST', headers: apiHeaders() });
+      const d = await r.json().catch(() => ({}));
+      toast(d.message || 'Kill switch engaged');
       poll();
     });
     document.getElementById('resume-btn').addEventListener('click', async () => {
       ensureKey();
-      await fetch('/api/start', { method: 'POST', headers: apiHeaders() });
+      const r = await fetch('/api/start', { method: 'POST', headers: apiHeaders() });
+      const d = await r.json().catch(() => ({}));
+      toast(d.message || 'Engine resumed');
       poll();
     });
     document.getElementById('ask-ai').addEventListener('click', async () => {

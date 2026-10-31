@@ -65,8 +65,18 @@ class TradingLoop:
         self._total_pnl = 0.0
         self._equity_curve: list[tuple[float, float]] = []
         self._metrics: dict[str, dict[str, Any]] = {
-            s.name: {"net_ev": 0.0, "win_rate": 0.0, "trades": 0, "wins": 0} for s in self.strategies
+            s.name: {
+                "net_ev": 0.0,
+                "win_rate": 0.0,
+                "trades": 0,
+                "wins": 0,
+                "notional_usd": 0.0,
+                "pnl_usd": 0.0,
+                "fees_usd": 0.0,
+            }
+            for s in self.strategies
         }
+        self._recent_trades: list[dict[str, Any]] = []
 
     def _build_strategies(self, settings: Settings) -> list[Any]:
         s = settings.strategies
@@ -137,12 +147,28 @@ class TradingLoop:
         for pos in self._open:
             payoff = outcome if pos["side"] == "up" else (1.0 - outcome)
             if pos["action"] == "buy":
-                pnl += (payoff - pos["price"]) * pos["size"] - pos["fee"]
+                trade_pnl = (payoff - pos["price"]) * pos["size"] - pos["fee"]
             else:
-                pnl += (pos["price"] - payoff) * pos["size"] - pos["fee"]
+                trade_pnl = (pos["price"] - payoff) * pos["size"] - pos["fee"]
+            pnl += trade_pnl
             m = self._metrics[pos["strategy"]]
-            m["wins"] += 1 if (payoff - pos["price"]) > 0 else 0
+            m["wins"] += 1 if trade_pnl > 0 else 0
+            m["pnl_usd"] += trade_pnl
+            if m["trades"]:
+                m["win_rate"] = m["wins"] / m["trades"]
+            self._recent_trades.append({
+                "ts": time.time(),
+                "strategy": pos["strategy"],
+                "side": pos["side"],
+                "action": pos["action"],
+                "price": pos["price"],
+                "size": pos["size"],
+                "notional": pos.get("notional", pos["price"] * pos["size"]),
+                "fee": pos["fee"],
+                "pnl": trade_pnl,
+            })
         self._open.clear()
+        self._recent_trades = self._recent_trades[-50:]
         self.safety.record_pnl(pnl)
         return pnl
 
@@ -223,19 +249,31 @@ class TradingLoop:
                 continue
             is_maker = d.order_type == "maker"
             fee = fee_models.fee("polymarket", size, d.price, is_maker)
+            notional = d.price * size
             self._open.append({
                 "tf": tf, "side": d.side, "action": d.action,
                 "price": d.price, "size": size, "fee": fee,
                 "strategy": d.strategy, "prob": d.prob_estimate,
+                "notional": notional, "ts": time.time(),
             })
-            self._metrics[d.strategy]["trades"] += 1
-            self._metrics[d.strategy]["net_ev"] += d.ev_estimate
+            m = self._metrics[d.strategy]
+            m["trades"] += 1
+            m["net_ev"] += d.ev_estimate
+            m["notional_usd"] += notional
+            m["fees_usd"] += fee
 
     def _update_state(self, ctx: MarketContext, decisions: list[Any]) -> None:
         self.state.regime = ctx.regime
         self.state.strategy_metrics = self._metrics
         self.state.equity_curve = self._equity_curve[-200:]
         self.state.risk["at_risk_usd"] = sum(p["price"] * p["size"] for p in self._open)
+        self.state.recent_trades = self._recent_trades[-50:]
+        self.state.trade_totals = {
+            "total_trades": sum(m["trades"] for m in self._metrics.values()),
+            "total_notional_usd": sum(m["notional_usd"] for m in self._metrics.values()),
+            "total_pnl_usd": self._total_pnl,
+            "total_fees_usd": sum(m["fees_usd"] for m in self._metrics.values()),
+        }
         if decisions:
             self.state.signals = [
                 f"{d.strategy}: {d.action} {d.side} @ {d.price:.3f} (EV {d.ev_estimate:+.3f})"
