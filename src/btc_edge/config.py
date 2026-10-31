@@ -44,7 +44,7 @@ class PolymarketConfig(BaseModel):
     min_order_shares: float = 5.0
     taker_fee_scale: float = 0.07
     maker_fee: float = 0.0
-    timeframes: list[int] = Field(default_factory=lambda: [300, 600, 900])
+    timeframes: list[int] = Field(default_factory=lambda: [300, 900])
 
 
 class KalshiConfig(BaseModel):

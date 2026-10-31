@@ -34,7 +34,12 @@ from btc_edge.web.live_feed import LiveMarketFeed
 
 logger = logging.getLogger(__name__)
 
-PRIMARY_TF = 300  # 5m window — where the strategy timeframes live (10s–300s)
+# (timeframe_seconds, venue, countdown_label). 5m trades on Polymarket, 15m on
+# Kalshi — the bot actively trades BOTH windows every cycle.
+TRADING_WINDOWS: tuple[tuple[int, str, str], ...] = (
+    (300, "polymarket", "5m"),
+    (900, "kalshi", "15m"),
+)
 IMPLIED_VOL_DEFAULT = 0.5  # annualized BTC IV proxy when Deribit DVOL is unavailable
 FEED_SAMPLE_HZ = 1.0 / 3.0  # live feed polls ~every 3s
 
@@ -58,9 +63,10 @@ class TradingLoop:
         )
         self.strategies = self._build_strategies(settings)
 
-        self._window_ts: int | None = None
-        self._window_open_price: float | None = None
-        self._last_features: dict[str, float] = {}
+        self._windows: dict[int, dict[str, Any]] = {
+            tf: {"window_ts": None, "open_price": None, "last_features": {}}
+            for tf, _, _ in TRADING_WINDOWS
+        }
         self._open: list[dict[str, Any]] = []
         self._total_pnl = 0.0
         self._equity_curve: list[tuple[float, float]] = []
@@ -112,39 +118,46 @@ class TradingLoop:
         return out
 
     def _sync_window(self, now: float) -> None:
-        """Detect window rollover and settle the previous window."""
+        """Detect rollover for each trading window and settle the expired one."""
         from btc_edge.connectors.poly_client import compute_window_ts
 
-        window_ts = compute_window_ts(now, PRIMARY_TF)
         spot = self.state.btc_price
-        if self._window_ts is None:
-            self._window_ts = window_ts
-            self._window_open_price = spot
-            return
-        if window_ts != self._window_ts:
-            self._settle_window()
-            self._window_ts = window_ts
-            self._window_open_price = spot
+        for tf, _, _ in TRADING_WINDOWS:
+            w = self._windows[tf]
+            window_ts = compute_window_ts(now, tf)
+            if w["window_ts"] is None:
+                w["window_ts"] = window_ts
+                w["open_price"] = spot
+                continue
+            if window_ts != w["window_ts"]:
+                self._settle_window(tf)
+                w["window_ts"] = window_ts
+                w["open_price"] = spot
 
-    def _settle_window(self) -> None:
+    def _settle_window(self, tf: int) -> None:
+        w = self._windows[tf]
         spot = self.state.btc_price
-        open_price = self._window_open_price
+        open_price = w["open_price"]
         if spot is None or open_price is None or open_price <= 0:
-            self._open.clear()
+            self._open = [p for p in self._open if p.get("tf") != tf]
             return
         outcome = 1.0 if spot >= open_price else 0.0
-        pnl = self._settle_positions(outcome)
-        if self._last_features:
-            self.ensemble.update(self._last_features, outcome, PRIMARY_TF)
+        pnl = self._settle_positions(tf, outcome)
+        if w["last_features"]:
+            self.ensemble.update(w["last_features"], outcome, tf)
             self.ensemble.retrain_lgbm()
         self._total_pnl += pnl
         self._equity_curve.append((time.time(), self._total_pnl))
         if len(self._equity_curve) > 200:
             self._equity_curve = self._equity_curve[-200:]
 
-    def _settle_positions(self, outcome: float) -> float:
+    def _settle_positions(self, tf: int, outcome: float) -> float:
         pnl = 0.0
+        remaining: list[dict[str, Any]] = []
         for pos in self._open:
+            if pos.get("tf") != tf:
+                remaining.append(pos)
+                continue
             payoff = outcome if pos["side"] == "up" else (1.0 - outcome)
             if pos["action"] == "buy":
                 trade_pnl = (payoff - pos["price"]) * pos["size"] - pos["fee"]
@@ -158,6 +171,8 @@ class TradingLoop:
                 m["win_rate"] = m["wins"] / m["trades"]
             self._recent_trades.append({
                 "ts": time.time(),
+                "tf": tf,
+                "venue": pos.get("venue", ""),
                 "strategy": pos["strategy"],
                 "side": pos["side"],
                 "action": pos["action"],
@@ -167,12 +182,12 @@ class TradingLoop:
                 "fee": pos["fee"],
                 "pnl": trade_pnl,
             })
-        self._open.clear()
+        self._open = remaining
         self._recent_trades = self._recent_trades[-50:]
         self.safety.record_pnl(pnl)
         return pnl
 
-    def _build_context(self, tf: int) -> MarketContext | None:
+    def _build_context(self, tf: int, venue: str, label: str) -> MarketContext | None:
         spot = self.state.btc_price
         if spot is None:
             return None
@@ -180,10 +195,16 @@ class TradingLoop:
         from btc_edge.connectors.poly_client import compute_window_ts
 
         window_ts = compute_window_ts(now, tf)
-        open_price = self._window_open_price if self._window_open_price else spot
-        time_remaining = self.state.window_countdowns.get("5m", float(tf))
-        pm = self.state.polymarket_markets.get("5m", {})
-        contract_price = float(pm.get("prob_up") or pm.get("up") or 0.5)
+        w = self._windows[tf]
+        open_price = w["open_price"] if w["open_price"] else spot
+        time_remaining = self.state.window_countdowns.get(label, float(tf))
+
+        if venue == "kalshi":
+            kal = self.state.kalshi_market or {}
+            contract_price = float(kal.get("prob_up") or kal.get("last_price") or 0.5)
+        else:
+            pm = self.state.polymarket_markets.get(label, {})
+            contract_price = float(pm.get("prob_up") or pm.get("up") or 0.5)
 
         prices = [p for _, p in self.state.price_history]
         rvol = realized_vol_from_prices(prices, sample_hz=FEED_SAMPLE_HZ) if len(prices) >= 2 else 0.0
@@ -212,7 +233,7 @@ class TradingLoop:
             "regime_amplifying": 1.0 if regime_str == "AMPLIFYING" else 0.0,
         }
         prob = self.ensemble.predict(feats, tf)
-        self._last_features = feats
+        w["last_features"] = feats
 
         # Synthetic 2-cent book around the market mid (no live CLOB stream yet).
         spread = 0.02
@@ -222,7 +243,7 @@ class TradingLoop:
         asks = [(ask_price, 5.0)]
 
         return MarketContext(
-            venue="polymarket",
+            venue=venue,
             timeframe_seconds=tf,
             window_ts=window_ts,
             window_open_price=open_price,
@@ -242,16 +263,16 @@ class TradingLoop:
             asks=asks,
         )
 
-    def _route_decisions(self, decisions: list[Any], tf: int) -> None:
+    def _route_decisions(self, decisions: list[Any], tf: int, venue: str) -> None:
         for d in decisions:
             size = self.router.size_for(d)
             if size <= 0:
                 continue
             is_maker = d.order_type == "maker"
-            fee = fee_models.fee("polymarket", size, d.price, is_maker)
+            fee = fee_models.fee(venue, size, d.price, is_maker)
             notional = d.price * size
             self._open.append({
-                "tf": tf, "side": d.side, "action": d.action,
+                "tf": tf, "venue": venue, "side": d.side, "action": d.action,
                 "price": d.price, "size": size, "fee": fee,
                 "strategy": d.strategy, "prob": d.prob_estimate,
                 "notional": notional, "ts": time.time(),
@@ -290,18 +311,25 @@ class TradingLoop:
             return
         now = time.time()
         self._sync_window(now)
-        ctx = self._build_context(PRIMARY_TF)
-        if ctx is None:
-            return
-        decisions: list[Any] = []
-        for strat in self.strategies:
-            try:
-                decisions.extend(strat.evaluate(ctx))
-            except Exception as exc:  # noqa: BLE001
-                logger.debug("%s evaluate error: %s", strat.name, exc)
-        if decisions and not self.state.kill_switch:
-            self._route_decisions(decisions, PRIMARY_TF)
-        self._update_state(ctx, decisions)
+        all_decisions: list[Any] = []
+        last_ctx: MarketContext | None = None
+        for tf, venue, label in TRADING_WINDOWS:
+            ctx = self._build_context(tf, venue, label)
+            if ctx is None:
+                continue
+            last_ctx = ctx
+            decisions: list[Any] = []
+            for strat in self.strategies:
+                try:
+                    decisions.extend(strat.evaluate(ctx))
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("%s evaluate error: %s", strat.name, exc)
+            if decisions and not self.state.kill_switch:
+                self._route_decisions(decisions, tf, venue)
+            all_decisions.extend(decisions)
+
+        if last_ctx is not None:
+            self._update_state(last_ctx, all_decisions)
 
         # Safety: bridge the watchdog to the shared dashboard kill switch.
         self.safety.state.kill_switch = self.state.kill_switch

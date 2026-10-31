@@ -211,7 +211,7 @@
       // Polymarket meters (5m/10m/15m Up probability).
       const poly = s.polymarket_markets || {};
       const polyEl = document.getElementById('poly-markets');
-      const tfOrder = ['5m', '10m', '15m'];
+      const tfOrder = ['5m', '15m'];
       polyEl.innerHTML = tfOrder.map(tf => {
         const m = poly[tf];
         if (!m) return `<div><div class="text-xs text-gray-400 mb-1">${tf}</div>${pctBar(null, '')}</div>`;
@@ -232,7 +232,7 @@
         : '<li class="text-gray-500">No active signal</li>';
 
       const cd = document.getElementById('countdowns');
-      const winTotal = { '5m': 300, '10m': 600, '15m': 900 };
+      const winTotal = { '5m': 300, '15m': 900 };
       cd.innerHTML = Object.entries(s.window_countdowns || {}).map(([k, v]) => {
         const total = winTotal[k] || 300;
         const remain = Math.max(0, Number(v));

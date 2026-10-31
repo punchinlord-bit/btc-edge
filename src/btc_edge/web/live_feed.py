@@ -3,7 +3,7 @@
 Polls public market-data endpoints (no API keys required for reads) on a short
 cadence and mirrors the results into the shared ``EngineState`` so the dashboard
 shows live, accurate numbers — a moving BTC price, per-venue probability meters,
-and 5m/10m/15m window countdown progress bars.
+and 5m/15m window countdown progress bars.
 
 All fetches are best-effort: a transient network error is logged and skipped, and
 never crashes the engine loop.
@@ -24,12 +24,12 @@ from btc_edge.web.app import EngineState
 logger = logging.getLogger(__name__)
 
 COINBASE_SPOT_URL = "https://api.coinbase.com/v2/prices/BTC-USD/spot"
-TIMEFRAMES: tuple[tuple[int, str], ...] = ((300, "5m"), (600, "10m"), (900, "15m"))
+TIMEFRAMES: tuple[tuple[int, str], ...] = ((300, "5m"), (900, "15m"))
 MAX_HISTORY_POINTS = 240
 
 
 def compute_countdowns(now: float | None = None) -> dict[str, float]:
-    """Seconds remaining in the current 5m/10m/15m windows (wall-clock accurate)."""
+    """Seconds remaining in the current 5m/15m windows (wall-clock accurate)."""
     now = now if now is not None else time.time()
     return {label: max(0.0, next_window_ts(now, tf) - now) for tf, label in TIMEFRAMES}
 

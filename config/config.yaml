@@ -11,7 +11,7 @@ polymarket:
   min_order_shares: 5.0         # 5-share minimum order size
   taker_fee_scale: 0.07         # taker fee = 0.07 * p * (1 - p) per share
   maker_fee: 0.0
-  timeframes: [300, 600, 900]   # 5m / 10m / 15m
+  timeframes: [300, 900]   # 5m (Polymarket) / 15m (Kalshi)
 
 kalshi:
   base_url: "https://external-api.kalshi.com/trade-api/v2"
@@ -44,9 +44,9 @@ strategies:
     enabled: true
     min_time_remaining: 10
     max_time_remaining: 120
-    min_prob: 0.93
+    min_prob: 0.70
     max_prob: 0.98
-    min_window_delta_pct: 0.05
+    min_window_delta_pct: 0.02
   market_maker:
     enabled: true
     min_time_remaining: 120
@@ -58,10 +58,10 @@ strategies:
     enabled: true
     min_time_remaining: 180
     max_time_remaining: 300
-    min_contract_price: 0.60
+    min_contract_price: 0.55
   iv_mispricing:
     enabled: true
-    min_divergence: 0.045
+    min_divergence: 0.02
 
 ml:
   trailing_window: 200

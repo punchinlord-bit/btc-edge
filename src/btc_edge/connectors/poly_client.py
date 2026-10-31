@@ -204,11 +204,11 @@ class PolymarketClient:
             )
         return self._secure
 
-    def resolve_5m_10m_15m(self, now_ts: float | None = None) -> dict[int, MarketResolution | None]:
-        """Resolve the current 5m/10m/15m markets deterministically."""
+    def resolve_5m_15m(self, now_ts: float | None = None) -> dict[int, MarketResolution | None]:
+        """Resolve the current 5m/15m markets deterministically."""
         now = now_ts if now_ts is not None else time.time()
         out: dict[int, MarketResolution | None] = {}
-        for tf in (300, 600, 900):
+        for tf in (300, 900):
             window_ts = compute_window_ts(now, tf)
             slug = slug_for(tf, window_ts)
             out[tf] = self.gamma.resolve_market(slug, tf, window_ts)
