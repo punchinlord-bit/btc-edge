@@ -83,6 +83,16 @@
     </div>
   </section>
 
+  <section class="card mb-6">
+    <div class="flex items-center justify-between mb-2">
+      <div class="widget-title" style="margin-bottom:0"><span>🏆</span> Champion vs Challenger Gate</div>
+      <button id="gate-eval-btn" class="px-4 py-1 rounded-lg bg-blue-700 hover:bg-blue-600 text-white text-sm font-semibold">Evaluate Challenger</button>
+    </div>
+    <div class="text-xs text-gray-400 mb-2">Champion <b id="gate-champion" class="text-gray-200">none</b> · OOS windows <b id="gate-oos" class="text-gray-200">0</b></div>
+    <div id="gate-checks" class="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs"></div>
+    <div id="gate-verdict" class="text-xs text-gray-500 mt-2">Submit a challenger config to run the 5-gate promotion check.</div>
+  </section>
+
   <section class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
     <div class="card">
       <div class="flex items-center justify-between mb-1">
@@ -259,7 +269,10 @@
       return out;
     }
     function initRocketChart() {
-      if (typeof LightweightCharts === 'undefined') return;
+      if (typeof LightweightCharts === 'undefined') {
+        document.getElementById('rocket-chart').innerHTML = '<div class="text-gray-500 text-sm p-6 text-center">Rocket chart unavailable — lightweight-charts CDN did not load (offline or blocked).</div>';
+        return;
+      }
       const el = document.getElementById('rocket-chart');
       rocketChart = LightweightCharts.createChart(el, {
         layout: { background: { type: 'solid', color: 'transparent' }, textColor: '#64748b' },
@@ -288,6 +301,55 @@
       el.textContent = m + ':' + s;
       el.className = 'pill bg-gray-800 font-mono ' + (rem <= 30 ? 'text-red-400' : (rem <= 120 ? 'text-amber-400' : 'text-amber-400'));
     }
+    function regimeMinText(rw) {
+      if (!rw) return '--';
+      const entries = Object.entries(rw).filter(e => e[1] > 0);
+      if (!entries.length) return '--';
+      const min = entries.reduce((a, b) => (a[1] < b[1] ? a : b));
+      return (min[1] * 100).toFixed(0) + '% min (' + min[0] + ')';
+    }
+    function renderGate(t) {
+      document.getElementById('gate-champion').textContent = t.champion_version_id || 'none';
+      if (t.oos_window_count != null) document.getElementById('gate-oos').textContent = t.oos_window_count;
+      const r = t.last_result || {};
+      const c = r.checks || {};
+      const badge = (p) => p === true ? '<span class="text-green-400 font-bold">PASS</span>' : (p === false ? '<span class="text-red-400 font-bold">FAIL</span>' : '<span class="text-gray-500">--</span>');
+      const evEdge = (r.challenger_net_ev != null && r.champion_net_ev != null) ? r.challenger_net_ev - r.champion_net_ev : null;
+      const cells = [
+        { k: 'Brier Calibration', v: r.challenger_brier != null ? Number(r.challenger_brier).toFixed(3) + ' vs ' + Number(r.champion_brier || 0).toFixed(3) : '--', p: c.brier },
+        { k: 'Net EV Edge', v: evEdge != null ? (evEdge >= 0 ? '+' : '') + (evEdge * 100).toFixed(0) + ' bps' : '--', p: c.net_ev },
+        { k: '3-Regime Floor', v: regimeMinText(r.regime_win_rates), p: c.regime_floor },
+        { k: '±10% Jitter', v: r.jitter_retention != null ? (r.jitter_retention * 100).toFixed(0) + '%' : '--', p: c.jitter },
+      ];
+      document.getElementById('gate-checks').innerHTML = cells.map(x =>
+        '<div class="bg-gray-900 border border-gray-800 rounded p-2"><div class="text-gray-500 mb-1">' + x.k + ' ' + badge(x.p) + '</div><div class="font-semibold text-gray-200">' + x.v + '</div></div>'
+      ).join('');
+      const verdict = document.getElementById('gate-verdict');
+      if (r.passed === true) { verdict.textContent = '✅ PROMOTED — challenger is now CHAMPION.'; verdict.className = 'text-xs text-green-400 mt-2'; }
+      else if (r.passed === false) { verdict.textContent = '❌ REJECTED — ' + ((r.reasons && r.reasons[0]) || 'gate failed'); verdict.className = 'text-xs text-red-400 mt-2'; }
+      else { verdict.textContent = 'Submit a challenger config to run the 5-gate promotion check.'; verdict.className = 'text-xs text-gray-500 mt-2'; }
+    }
+    async function pollGate() {
+      try {
+        const r = await fetch('/api/btc-15m/telemetry', { headers: apiHeaders() });
+        if (r.ok) renderGate(await r.json());
+      } catch (e) { /* ignore */ }
+    }
+    document.getElementById('gate-eval-btn').addEventListener('click', async () => {
+      ensureKey();
+      const btn = document.getElementById('gate-eval-btn');
+      btn.disabled = true; btn.textContent = 'Evaluating…';
+      try {
+        const h = apiHeaders(); h['Content-Type'] = 'application/json';
+        const r = await fetch('/api/btc-15m/gate/evaluate', {
+          method: 'POST', headers: h,
+          body: JSON.stringify({ version_id: 'challenger-' + Date.now(), config: { bias: 0.0, x1: 1.0, x2: 0.5 } }),
+        });
+        renderGate({ champion_version_id: null, oos_window_count: null, last_result: await r.json() });
+        pollGate();
+      } catch (e) { toast('Gate evaluation failed'); }
+      btn.disabled = false; btn.textContent = 'Evaluate Challenger';
+    });
     function pctBar(p, color) {
       if (p == null || isNaN(p)) return '<div class="text-gray-500">--</div>';
       const w = Math.max(0, Math.min(100, p * 100));
@@ -524,8 +586,10 @@
     initRocketChart();
     updateRocketTimer();
     poll();
+    pollGate();
     setInterval(poll, 1000);
     setInterval(updateRocketTimer, 1000);
+    setInterval(pollGate, 5000);
   </script>
 </body>
 </html>
