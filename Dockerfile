@@ -17,7 +17,6 @@ COPY pyproject.toml README.md ./
 COPY src ./src
 COPY config ./config
 COPY scripts ./scripts
-COPY data ./data
 
 RUN pip install --upgrade pip && pip install .
 

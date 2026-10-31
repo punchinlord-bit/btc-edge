@@ -1,0 +1,13 @@
+# Docker build context excludes (keeps the image small + avoids COPY failures).
+.git
+.venv
+venv
+__pycache__
+*.py[cod]
+.pytest_cache
+.mypy_cache
+.ruff_cache
+data
+*.db
+*.sqlite3
+.env

@@ -48,7 +48,7 @@ btc-edge-backtest = "btc_edge.backtest.report:cli"
 where = ["src"]
 
 [tool.setuptools.package-data]
-"btc_edge.web" = ["templates/*.html"]
+"btc_edge.web" = ["templates/*.html", "static/*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
