@@ -182,6 +182,17 @@ def main() -> int:
             wallet=pm_wallet,
             private_key=pm_key,
         )
+        _k = pm_key.strip().lstrip("0x")
+        _wallet_ok = pm_wallet.strip().startswith("0x")
+        if not (_wallet_ok and len(_k) == 64 and all(c in "0123456789abcdefABCDEF" for c in _k)):
+            print("=" * 70)
+            print("WARNING: Polymarket credentials look malformed (trading will be")
+            print("Kalshi-only until fixed). The SDK needs an EVM private key and")
+            print("wallet address, e.g.:")
+            print("  POLYMARKET_PRIVATE_KEY=<64 hex chars>")
+            print("  POLYMARKET_WALLET=0x<40 hex chars>")
+            print("Your .env currently has a base64 key + UUID wallet instead.")
+            print("=" * 70)
 
     # Start the trading loop: strategies → router → paper/live settlement.
     trader = TradingLoop(
