@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BTC-Edge Dashboard</title>
+  <link rel="icon" type="image/png" href="/static/favicon.png" />
+  <link rel="shortcut icon" href="/static/favicon.ico" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <style>
+    body { background: #0b0f1a; color: #e5e7eb; font-family: ui-sans-serif, system-ui, sans-serif; }
+    .card { background: #131a2a; border: 1px solid #1f2a44; border-radius: 0.75rem; padding: 1rem; }
+    .badge-dampening { background: #064e3b; color: #34d399; }
+    .badge-amplifying { background: #7f1d1d; color: #f87171; }
+    .banner { border: 1px solid #1f2a44; border-radius: 0.75rem; overflow: hidden; }
+  </style>
+</head>
+<body class="min-h-screen p-6">
+  <div class="banner mb-6">
+    <img src="/static/banner.png" alt="BTC-Edge" class="w-full h-auto block" />
+  </div>
+
+  <header class="flex items-center justify-between mb-6">
+    <h1 class="text-2xl font-bold tracking-tight">BTC-Edge</h1>
+    <div class="flex items-center gap-2">
+      <span id="trade-only" class="px-3 py-1 rounded-full text-xs font-semibold bg-gray-700">trade-only</span>
+      <div id="mode-badge" class="px-3 py-1 rounded-full text-sm font-semibold bg-gray-700">paper</div>
+    </div>
+  </header>
+
+  <div class="card mb-6 border-yellow-700/50">
+    <h2 class="text-sm uppercase tracking-wide text-gray-400 mb-2">What the bot thinks (plain English)</h2>
+    <p id="advice" class="text-lg">Loading…</p>
+    <div class="mt-3 flex flex-wrap gap-3 text-sm">
+      <span class="px-3 py-1 rounded-full bg-gray-800">At risk: <b id="at-risk">--</b></span>
+      <span class="px-3 py-1 rounded-full bg-gray-800">News tone: <b id="news-tone">--</b></span>
+      <span class="px-3 py-1 rounded-full bg-gray-800">Regime: <b id="regime-text">--</b></span>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+    <div class="card">
+      <h2 class="text-sm uppercase tracking-wide text-gray-400 mb-2">Window Countdown</h2>
+      <div id="countdowns" class="space-y-1 text-lg font-mono"></div>
+    </div>
+    <div class="card">
+      <h2 class="text-sm uppercase tracking-wide text-gray-400 mb-2">BRTI 60s vs Strike</h2>
+      <div class="text-2xl font-mono"><span id="brti">--</span></div>
+      <div class="text-sm text-gray-400">Strike: <span id="strike">--</span></div>
+    </div>
+    <div class="card">
+      <h2 class="text-sm uppercase tracking-wide text-gray-400 mb-2">Signals</h2>
+      <ul id="signals" class="text-sm space-y-1 list-disc list-inside text-yellow-300"></ul>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+    <div class="card">
+      <h2 class="text-sm uppercase tracking-wide text-gray-400 mb-2">Strategy Metrics</h2>
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="text-gray-400 border-b border-gray-700">
+            <th class="text-left py-1">Strategy</th><th class="text-right">Net EV</th><th class="text-right">Win Rate</th>
+          </tr>
+        </thead>
+        <tbody id="strategy-table"></tbody>
+      </table>
+    </div>
+    <div class="card">
+      <h2 class="text-sm uppercase tracking-wide text-gray-400 mb-2">Equity Curve</h2>
+      <canvas id="equity-chart" height="180"></canvas>
+    </div>
+  </div>
+
+  <div class="card mb-6">
+    <div class="flex items-center justify-between mb-2">
+      <h2 class="text-sm uppercase tracking-wide text-gray-400">AI Assistant (read-only — it can never trade)</h2>
+      <button id="ask-ai" class="px-4 py-1 rounded-lg bg-blue-700 hover:bg-blue-600 text-white text-sm font-semibold">Ask the AI</button>
+    </div>
+    <div id="ai-output" class="text-sm whitespace-pre-wrap text-gray-200">Press "Ask the AI" for a plain-English explanation of what the bot is doing.</div>
+  </div>
+
+  <div class="flex justify-center gap-4">
+    <button id="resume-btn"
+      class="px-10 py-4 rounded-xl bg-green-700 hover:bg-green-600 text-white text-xl font-bold">
+      ▶ RESUME
+    </button>
+    <button id="halt-btn"
+      class="px-10 py-4 rounded-xl bg-red-700 hover:bg-red-600 text-white text-xl font-bold shadow-lg shadow-red-900/50">
+      ■ HALT (KILL SWITCH)
+    </button>
+  </div>
+
+  <script>
+    let chart = null;
+    function initChart() {
+      const ctx = document.getElementById('equity-chart').getContext('2d');
+      chart = new Chart(ctx, {
+        type: 'line',
+        data: { labels: [], datasets: [{ label: 'Equity', data: [], borderColor: '#34d399', tension: 0.2, fill: false }] },
+        options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: false } } }
+      });
+    }
+
+    function render(s) {
+      document.getElementById('mode-badge').textContent = s.mode;
+      document.getElementById('mode-badge').className = 'px-3 py-1 rounded-full text-sm font-semibold ' + (s.mode === 'live' ? 'bg-red-700' : 'bg-gray-700');
+      document.getElementById('trade-only').className = 'px-3 py-1 rounded-full text-xs font-semibold ' + (s.trade_only_keys ? 'bg-emerald-900 text-emerald-300' : 'bg-red-900 text-red-300');
+      document.getElementById('trade-only').textContent = s.trade_only_keys ? 'trade-only keys ✓' : 'WARNING: withdrawal possible';
+
+      document.getElementById('brti').textContent = s.brti_60s != null ? Number(s.brti_60s).toFixed(2) : '--';
+      document.getElementById('strike').textContent = s.open_strike != null ? Number(s.open_strike).toFixed(2) : '--';
+
+      document.getElementById('advice').textContent = s.advice || '';
+      document.getElementById('at-risk').textContent = s.at_risk_usd != null ? '$' + Number(s.at_risk_usd).toFixed(2) : '--';
+      document.getElementById('news-tone').textContent = s.news_tone || '--';
+      document.getElementById('regime-text').textContent = s.regime || '--';
+
+      const sig = document.getElementById('signals');
+      sig.innerHTML = (s.signals && s.signals.length)
+        ? s.signals.slice(0, 6).map(x => `<li>${x}</li>`).join('')
+        : '<li class="text-gray-500">No active signal</li>';
+
+      const cd = document.getElementById('countdowns');
+      cd.innerHTML = Object.entries(s.window_countdowns || {}).map(([k, v]) => `<div>${k}: <span class="text-yellow-400">${Number(v).toFixed(0)}s</span></div>`).join('') || '<div class="text-gray-500">--</div>';
+
+      const tbody = document.getElementById('strategy-table');
+      tbody.innerHTML = Object.entries(s.strategy_metrics || {}).map(([name, m]) =>
+        `<tr class="border-b border-gray-800"><td class="py-1">${name}</td><td class="text-right">${(m.net_ev ?? 0).toFixed(4)}</td><td class="text-right">${((m.win_rate ?? 0) * 100).toFixed(1)}%</td></tr>`
+      ).join('') || '<tr><td colspan="3" class="text-gray-500">--</td></tr>';
+
+      if (chart) {
+        const eq = s.equity_curve || [];
+        chart.data.labels = eq.map((_, i) => i);
+        chart.data.datasets[0].data = eq.map(e => e[1]);
+        chart.update();
+      }
+
+      const halted = s.kill_switch;
+      document.getElementById('halt-btn').className = halted
+        ? 'px-10 py-4 rounded-xl bg-red-900 text-white text-xl font-bold ring-2 ring-red-500'
+        : 'px-10 py-4 rounded-xl bg-red-700 hover:bg-red-600 text-white text-xl font-bold shadow-lg shadow-red-900/50';
+      document.getElementById('resume-btn').className = 'px-10 py-4 rounded-xl bg-green-700 hover:bg-green-600 text-white text-xl font-bold';
+    }
+
+    async function poll() {
+      try {
+        const [m, o, st] = await Promise.all([
+          fetch('/api/metrics').then(r => r.json()),
+          fetch('/api/overview').then(r => r.json()),
+          fetch('/api/status').then(r => r.json()),
+        ]);
+        render(Object.assign({}, m, o, st));
+      } catch (e) { /* ignore */ }
+    }
+
+    document.getElementById('halt-btn').addEventListener('click', async () => {
+      await fetch('/api/halt', { method: 'POST' });
+      poll();
+    });
+    document.getElementById('resume-btn').addEventListener('click', async () => {
+      await fetch('/api/start', { method: 'POST' });
+      poll();
+    });
+    document.getElementById('ask-ai').addEventListener('click', async () => {
+      const out = document.getElementById('ai-output');
+      out.textContent = 'Thinking…';
+      try {
+        const r = await fetch('/api/assistant', { method: 'POST' });
+        const d = await r.json();
+        out.textContent = d.text;
+      } catch (e) {
+        out.textContent = 'The AI assistant is unavailable right now.';
+      }
+    });
+
+    initChart();
+    poll();
+    setInterval(poll, 1000);
+  </script>
+</body>
+</html>

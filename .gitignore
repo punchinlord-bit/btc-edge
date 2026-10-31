@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+
+# Tooling caches
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Environment & secrets
+.env
+*.env.local
+
+# Data artifacts (large / regenerated)
+data/raw/
+data/historical/
+data/*.db
+data/*.sqlite3
+data/*.json
+data/*.jsonl
+
+# Reports
+BACKTEST_VALIDATION_REPORT.md
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

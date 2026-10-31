@@ -1,0 +1,19 @@
+services:
+  engine:
+    build: .
+    container_name: btc-edge-engine
+    environment:
+      - ALLOW_LIVE_TRADING=${ALLOW_LIVE_TRADING:-FALSE}
+      - KALSHI_API_KEY_ID=${KALSHI_API_KEY_ID:-}
+      - KALSHI_PRIVATE_KEY=${KALSHI_PRIVATE_KEY:-}
+      - KALSHI_USE_DEMO=${KALSHI_USE_DEMO:-true}
+      - POLYMARKET_WALLET=${POLYMARKET_WALLET:-}
+      - POLYMARKET_PRIVATE_KEY=${POLYMARKET_PRIVATE_KEY:-}
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./config:/app/config
+    ports:
+      - "8000:8000"
+    restart: unless-stopped

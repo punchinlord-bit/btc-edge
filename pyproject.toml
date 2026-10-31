@@ -1,0 +1,73 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "btc-edge"
+version = "0.1.0"
+description = "Autonomous multi-timeframe (5m/10m/15m) prediction-market trading engine for BTC"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Proprietary" }
+authors = [{ name = "BTC-Edge" }]
+dependencies = [
+    "numpy>=1.26",
+    "pandas>=2.1",
+    "pydantic>=2.6,<3",
+    "pydantic-settings>=2.2",
+    "sqlalchemy>=2.0",
+    "pyyaml>=6.0",
+    "httpx>=0.27",
+    "requests>=2.31",
+    "websockets>=13,<16",
+    "cryptography>=42.0",
+    "polymarket-client>=0.12.0,<0.16",
+    "lightgbm>=4.3",
+    "scikit-learn>=1.4",
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "jinja2>=3.1",
+    "python-dateutil>=2.9",
+]
+
+[project.optional-dependencies]
+desktop = ["PySide6>=6.6"]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.4",
+    "mypy>=1.9",
+    "pytest-cov>=5.0",
+]
+
+[project.scripts]
+btc-edge-bootstrap = "btc_edge.historical.bootstrapper:cli"
+btc-edge-backtest = "btc_edge.backtest.report:cli"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"btc_edge.web" = ["templates/*.html"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+addopts = "-q"
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+extend-exclude = ["data", ".venv"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+check_untyped_defs = true
+warn_unused_ignores = false
+exclude = ["data/", ".venv/", "tests/"]

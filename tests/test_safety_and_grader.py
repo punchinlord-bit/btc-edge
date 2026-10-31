@@ -1,0 +1,188 @@
+"""Tests for the execution router, safety watchdog, nightly grader, ML ensemble,
+configuration, and database layer."""
+
+from __future__ import annotations
+
+import time
+
+import pytest
+
+from btc_edge.config import load_settings
+from btc_edge.execution.router import (
+    Router,
+    kelly_fraction,
+    quarter_kelly_size,
+)
+from btc_edge.execution.safety import SafetyWatchdog
+from btc_edge.ml.model import FEATURE_ORDER, ProbabilityEnsemble, feature_vector
+from btc_edge.ml.nightly_grader import (
+    ACTIVE,
+    QUARANTINE,
+    NightlyGrader,
+    SettlementRecord,
+)
+from btc_edge.strategies.base import StrategyDecision
+
+# ------------------------------------------------------------------ config
+
+def test_config_defaults_to_paper():
+    s = load_settings()
+    assert s.trading.mode == "paper"
+    assert not s.live_trading_allowed()
+
+
+def test_live_requires_both_checks(monkeypatch):
+    s = load_settings()
+    s.trading.mode = "live"
+    monkeypatch.delenv("ALLOW_LIVE_TRADING", raising=False)
+    assert not s.live_trading_allowed()
+    monkeypatch.setenv("ALLOW_LIVE_TRADING", "TRUE")
+    assert s.live_trading_allowed()
+
+
+# ------------------------------------------------------------------- router
+
+def test_kelly_fraction():
+    assert kelly_fraction(0.6, 0.5) == pytest.approx((0.6 - 0.5) / 0.5)
+    assert kelly_fraction(0.4, 0.5) == 0.0
+
+
+def test_quarter_kelly_capped():
+    size = quarter_kelly_size(prob=0.6, price=0.5, bankroll=10000.0, cap_pct=10.0)
+    assert size == pytest.approx(500.0, rel=1e-6)
+
+
+def test_router_paper_mode_no_live():
+    s = load_settings()
+    router = Router(s)
+    assert not router.live_allowed
+    decision = StrategyDecision(
+        strategy="late_scalp", side="up", action="buy", price=0.9, size=5.0,
+        order_type="taker", reason="test", prob_estimate=0.95, ev_estimate=0.04,
+    )
+    order = router.route(decision, venue="polymarket", outcome=1.0)
+    assert not order.routed_live
+    assert order.status == "filled"
+
+
+# ------------------------------------------------------------------- safety
+
+def test_safety_kill_switch_and_flush():
+    w = SafetyWatchdog(bankroll=10000.0)
+    w.trigger_kill_switch()
+    assert w.state.kill_switch
+    w.emergency_flush()
+
+
+def test_safety_health_timeout():
+    w = SafetyWatchdog(bankroll=10000.0)
+    w.heartbeat("coinbase", ts=time.time() - 100.0)
+    assert not w.healthy(["coinbase"], now=time.time())
+
+
+def test_safety_daily_loss_breach():
+    w = SafetyWatchdog(bankroll=10000.0, max_daily_loss_pct=5.0)
+    w.record_pnl(-600.0)
+    assert w.daily_loss_limit_breached()
+    assert w.check_and_halt([])
+    assert w.state.halted
+
+
+# ------------------------------------------------------------------- grader
+
+def _records() -> list[SettlementRecord]:
+    def _rec(strategy: str, ts: int, ev: float, win: bool) -> SettlementRecord:
+        return SettlementRecord(
+            strategy=strategy, rule_id="r", window_ts=ts, net_ev=ev,
+            win=win, prob=0.8, outcome=1.0 if win else 0.0,
+        )
+
+    return [
+        _rec("a", 1, 0.1, True),
+        _rec("a", 2, -0.05, False),
+        _rec("a", 3, 0.2, True),
+        _rec("b", 1, -0.1, False),
+        _rec("b", 2, -0.1, False),
+    ]
+
+
+def test_grader_computes_metrics():
+    g = NightlyGrader(trailing_window=200)
+    results = g.grade(_records())
+    a = results[("a", "r")]
+    b = results[("b", "r")]
+    assert a.n == 3
+    assert a.net_ev == pytest.approx((0.1 - 0.05 + 0.2) / 3)
+    assert a.win_rate == pytest.approx(2 / 3)
+    assert a.status == ACTIVE
+    assert b.status == QUARANTINE
+    assert b.net_ev == pytest.approx(-0.1)
+
+
+def test_grader_quarantine_gate():
+    g = NightlyGrader(trailing_window=200)
+    results = g.grade(_records())
+    assert g.is_quarantined(results, "b", "r")
+    assert not g.is_quarantined(results, "a", "r")
+
+
+# -------------------------------------------------------------------- ml
+
+def test_feature_vector_shape():
+    v = feature_vector({"window_delta_pct": 0.1, "time_remaining": 150.0}, timeframe_seconds=300)
+    assert v.shape[0] == len(FEATURE_ORDER)
+
+
+def test_ensemble_fallback_and_learning():
+    ens = ProbabilityEnsemble()
+    assert ens.predict({"option_implied_prob": 0.7}) == pytest.approx(0.7)
+
+    for i in range(8):
+        ens.update(
+            {"window_delta_pct": 0.01 * i, "option_implied_prob": 0.5 + 0.01 * i,
+             "book_imbalance": 0.1, "micro_acceleration": 0.0, "time_remaining": 100.0,
+             "regime_dampening": 1.0, "regime_amplifying": 0.0, "contract_price": 0.5,
+             "realized_vol": 0.2, "implied_vol": 0.45},
+            outcome=1.0 if i % 2 == 0 else 0.0,
+        )
+    ens.retrain_lgbm()
+    p = ens.predict(
+        {"window_delta_pct": 0.02, "option_implied_prob": 0.6, "book_imbalance": 0.1,
+         "micro_acceleration": 0.0, "time_remaining": 100.0, "regime_dampening": 1.0,
+         "regime_amplifying": 0.0, "contract_price": 0.55, "realized_vol": 0.2, "implied_vol": 0.45},
+    )
+    assert 0.0 <= p <= 1.0
+
+
+# --------------------------------------------------------------------- db
+
+def test_database_roundtrip(tmp_path):
+    from btc_edge.db.models import Signal, Window
+    from btc_edge.db.session import Database
+
+    db = Database(tmp_path / "test.db")
+    try:
+        sess = db.session()
+        w = Window(
+            venue="kalshi", market_slug="KXBTC15M-1", timeframe_seconds=900,
+            window_ts=1000, window_open_price=60000.0, settle_price=60100.0,
+            resolved=True, outcome="up", result=1.0,
+        )
+        sess.add(w)
+        sess.commit()
+
+        sig = Signal(
+            window_id=w.id, strategy="late_scalp", side="up", contract_price=0.9,
+            prob_estimate=0.95, window_delta_pct=0.1, option_implied_prob=0.94,
+            book_imbalance=0.2, micro_acceleration=0.0, regime="DAMPENING",
+            time_remaining=50.0, rule_snapshot_json="{}", ev_estimate=0.04,
+        )
+        sess.add(sig)
+        sess.commit()
+
+        assert sess.query(Window).count() == 1
+        assert sess.query(Signal).count() == 1
+        sess.close()
+    finally:
+        db.close()
+

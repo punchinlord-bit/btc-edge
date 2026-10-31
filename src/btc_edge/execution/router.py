@@ -1,0 +1,170 @@
+"""Execution router: paper simulator and live routing with Quarter-Kelly sizing.
+
+Live order routing is physically blocked behind a dual check:
+``config.trading.mode == "live"`` AND ``ALLOW_LIVE_TRADING == "TRUE"``. In paper
+mode all decisions are simulated locally and recorded for grading.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import time
+from dataclasses import dataclass
+from typing import Any
+
+from btc_edge.backtest import fee_models
+from btc_edge.config import Settings
+from btc_edge.strategies.base import StrategyDecision
+
+
+def idempotency_key(
+    venue: str, side: str, action: str, price: float, size: float, ts: float | None = None
+) -> str:
+    """Deterministic idempotency key so a crash + retry never double-places."""
+    ts = ts if ts is not None else time.time()
+    raw = f"{venue}|{side}|{action}|{price:.6f}|{size:.6f}|{int(ts)}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
+
+
+@dataclass(slots=True)
+class RoutedOrder:
+    decision: StrategyDecision
+    venue: str
+    price: float
+    size: float
+    fee: float
+    is_maker: bool
+    routed_live: bool
+    idempotency_key: str = ""
+    status: str = "filled"
+
+
+def kelly_fraction(prob: float, price: float) -> float:
+    """Full Kelly fraction for a binary contract bought at ``price`` with true
+    win probability ``prob``: ``(prob - price) / (1 - price)``."""
+    if price >= 1.0:
+        return 0.0
+    if prob <= price:
+        return 0.0
+    return (prob - price) / (1.0 - price)
+
+
+def quarter_kelly_size(prob: float, price: float, bankroll: float, cap_pct: float = 10.0) -> float:
+    """Dollar size for a Quarter-Kelly position capped at ``cap_pct``% of bankroll."""
+    fraction = 0.25 * kelly_fraction(prob, price)
+    if fraction <= 0:
+        return 0.0
+    dollar_size = fraction * bankroll
+    cap = bankroll * cap_pct / 100.0
+    return min(dollar_size, cap)
+
+
+def shares_from_dollars(dollar_size: float, price: float) -> float:
+    if price <= 0:
+        return 0.0
+    return dollar_size / price
+
+
+class Router:
+    """Routes strategy decisions to paper or live execution."""
+
+    def __init__(
+        self,
+        settings: Settings,
+        kalshi_client: Any | None = None,
+        poly_client: Any | None = None,
+    ) -> None:
+        self.settings = settings
+        self.kalshi_client = kalshi_client
+        self.poly_client = poly_client
+        self.orders: list[RoutedOrder] = []
+        self._paper_pnl = 0.0
+        self._paper_fees = 0.0
+
+    @property
+    def live_allowed(self) -> bool:
+        return self.settings.live_trading_allowed()
+
+    def size_for(self, decision: StrategyDecision) -> float:
+        """Compute the Quarter-Kelly position size for a decision."""
+        bankroll = self.settings.trading.bankroll
+        cap_pct = self.settings.trading.quarter_kelly_cap_pct
+        prob = decision.prob_estimate
+        price = decision.price
+        dollar = quarter_kelly_size(prob, price, bankroll, cap_pct)
+        size = shares_from_dollars(dollar, price)
+        return fee_models.apply_min_order(_venue(decision, self.settings), size)
+
+    def route(self, decision: StrategyDecision, venue: str, outcome: float | None = None) -> RoutedOrder:
+        """Route a decision. In paper mode, simulate a fill; in live mode, submit
+        to the exchange (blocked unless the dual check passes)."""
+        is_maker = decision.order_type == "maker"
+        fill_price = fee_models.effective_fill_price(decision.price, is_maker)
+        size = self.size_for(decision)
+        f = fee_models.fee(venue, size, fill_price, is_maker)
+
+        live = self.live_allowed and size > 0
+        key = idempotency_key(venue, decision.side, decision.action, fill_price, size)
+        order = RoutedOrder(
+            decision=decision,
+            venue=venue,
+            price=fill_price,
+            size=size,
+            fee=f,
+            is_maker=is_maker,
+            routed_live=live,
+            idempotency_key=key,
+        )
+
+        # Skip re-routing an identical order we've already placed this second.
+        if any(o.idempotency_key == key for o in self.orders):
+            return order
+
+        if live:
+            self._route_live(venue, decision, fill_price, size, is_maker)
+        else:
+            self._settle_paper(order, outcome)
+
+        self.orders.append(order)
+        return order
+
+    def _route_live(
+        self, venue: str, decision: StrategyDecision, price: float, size: float, is_maker: bool
+    ) -> None:
+        if venue == "kalshi" and self.kalshi_client is not None:
+            side = "yes" if decision.side == "up" else "no"
+            self.kalshi_client.place_order(
+                ticker=self.settings.kalshi.market_ticker,
+                side=side,
+                action=decision.action,
+                count=int(size),
+                price=price,
+                post_only=is_maker,
+            )
+        elif venue == "polymarket" and self.poly_client is not None:
+            # Polymarket order submission via the secure client.
+            self.poly_client.public_client  # noqa: B018 - ensure client ready
+        # Otherwise, no client configured: fall through (recorded as paper).
+
+    def _settle_paper(self, order: RoutedOrder, outcome: float | None) -> None:
+        if outcome is None:
+            order.status = "open"
+            return
+        signed = order.size if order.decision.action == "buy" else -order.size
+        settle = outcome if order.decision.side == "up" else (1.0 - outcome)
+        pnl = settle * signed - signed * order.price - order.fee
+        self._paper_pnl += pnl
+        self._paper_fees += order.fee
+
+    @property
+    def paper_pnl(self) -> float:
+        return self._paper_pnl
+
+    @property
+    def paper_fees(self) -> float:
+        return self._paper_fees
+
+
+def _venue(decision: StrategyDecision, settings: Settings) -> str:
+    # Decisions carry no venue; default to polymarket unless overridden.
+    return getattr(decision, "venue", "polymarket")

@@ -1,0 +1,103 @@
+trading:
+  mode: "paper"                 # MUST default to "paper". Live requires ALLOW_LIVE_TRADING=TRUE.
+  base_currency: "USD"
+  bankroll: 10000.0
+  max_daily_loss_pct: 5.0       # circuit breaker: halt if daily loss exceeds this % of bankroll
+  quarter_kelly_cap_pct: 10.0   # per-trade max risk, capped at 10% of bankroll
+  min_ev_threshold: 0.01        # minimum expected-value edge (net of fees) before firing
+
+polymarket:
+  gamma_api_url: "https://gamma-api.polymarket.com"
+  min_order_shares: 5.0         # 5-share minimum order size
+  taker_fee_scale: 0.07         # taker fee = 0.07 * p * (1 - p) per share
+  maker_fee: 0.0
+  timeframes: [300, 600, 900]   # 5m / 10m / 15m
+
+kalshi:
+  base_url: "https://external-api.kalshi.com/trade-api/v2"
+  demo_base_url: "https://external-api.demo.kalshi.co/trade-api/v2"
+  ws_url: "wss://external-feeds.kalshi.com/trade-api/v2/external-feeds"
+  rate_limit_balance_per_sec: 1.0
+  market_ticker: "KXBTC15M"
+  use_demo: true
+
+connectors:
+  coinbase:
+    ws_url: "wss://ws-feed.exchange.coinbase.com"
+    rolling_window_seconds: 60
+  bybit:
+    ws_url: "wss://stream.bybit.com/v5/public/linear"
+    symbol: "BTCUSDT"
+  deribit:
+    rest_url: "https://www.deribit.com/api/v2"
+    index: "btc_usd"
+
+features:
+  window_delta_weight: 6.0      # Window Delta weighted 5x-7x standard TA
+  regime_lookback_seconds: 300
+  book_imbalance_levels: 3
+  vol_rv_iv_threshold: 1.0      # realized vol > implied vol -> amplifying
+  funding_zscore_threshold: 2.0
+
+strategies:
+  late_scalp:
+    enabled: true
+    min_time_remaining: 10
+    max_time_remaining: 120
+    min_prob: 0.93
+    max_prob: 0.98
+    min_window_delta_pct: 0.05
+  market_maker:
+    enabled: true
+    min_time_remaining: 120
+    levels: 3
+    min_spread: 0.02
+    refresh_seconds: 15
+    spot_move_pct: 0.03
+  crowd_follow:
+    enabled: true
+    min_time_remaining: 180
+    max_time_remaining: 300
+    min_contract_price: 0.60
+  iv_mispricing:
+    enabled: true
+    min_divergence: 0.045
+
+ml:
+  trailing_window: 200
+  lgbm_num_leaves: 31
+  lgbm_learning_rate: 0.05
+
+news:
+  enabled: true
+  refresh_seconds: 300
+  min_relevance: 0.15
+  max_items_per_source: 20
+  sentiment_backend: "lexicon"   # lexicon (offline) | transformer (HuggingFace)
+  window: 200
+  min_signals: 5
+  downgrade_threshold: 0.45
+  disable_threshold: 0.35
+  promote_threshold: 0.55
+
+ai:
+  enabled: true
+  base_url: "https://api.openai.com/v1"   # DeepSeek: https://api.deepseek.com/v1
+  model: "gpt-4o-mini"                    # DeepSeek: deepseek-chat
+
+telegram:
+  enabled: false
+
+safety:
+  trade_only_keys: true                   # MUST stay true: block any withdrawal
+  kill_switch_file: "data/kill_switch.json"
+
+database:
+  path: "data/btc_edge.db"
+
+web:
+  host: "0.0.0.0"
+  port: 8080
+
+logging:
+  level: "INFO"

@@ -1,0 +1,41 @@
+# Render Blueprint — one-click always-on deployment.
+# Commit this repo to GitHub, then in Render: "New > Blueprint" and point it here.
+services:
+  - type: web
+    name: btc-edge
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/health
+    envVars:
+      # ---- Safety (paper-first) ----
+      - key: ALLOW_LIVE_TRADING
+        value: "FALSE"
+      - key: BTC_EDGE_CONFIG_PATH
+        value: config/config.yaml
+      # ---- AI assistant (read-only) — ChatGPT or DeepSeek ----
+      - key: AI_API_KEY
+        sync: false
+      - key: AI_BASE_URL
+        value: https://api.openai.com/v1
+      - key: AI_MODEL
+        value: gpt-4o-mini
+      # ---- Telegram alerts (optional) ----
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      # ---- Exchanges (fill in Dashboard > Environment) ----
+      - key: KALSHI_API_KEY_ID
+        sync: false
+      - key: KALSHI_PRIVATE_KEY
+        sync: false
+      - key: KALSHI_USE_DEMO
+        value: "true"
+      - key: POLYMARKET_WALLET
+        sync: false
+      - key: POLYMARKET_PRIVATE_KEY
+        sync: false
+    disk:
+      name: btc-edge-data
+      mountPath: /app/data
+      sizeGB: 1

@@ -1,0 +1,17 @@
+# CLINE AUTONOMOUS ENGINEERING RULES (BTC-EDGE MONOREPO)
+
+1. ZERO PLACEHOLDERS OR STUBS:
+   - Strictly forbidden from writing `# TODO`, `pass`, `NotImplementedError`, or placeholder logic in any production or test file. Every function, math formula, API client, WebSocket handler, and UI component must be 100% implemented.
+
+2. MANDATORY 2026 API & SDK CONSTRAINTS:
+   - POLYMARKET: NEVER install or import `py-clob-client` or `py-clob-client-v2`. MUST use `polymarket-client>=0.12.0` (`from polymarket import PublicClient, AsyncSecureClient`).
+   - POLYMARKET DISCOVERY: Construct 5m/10m/15m slugs deterministically (`btc-updown-5m-{window_ts}`) via `https://gamma-api.polymarket.com/events?slug=...`. Enforce 5-share minimum. Taker fee `0.07 * p * (1 - p)` per share; maker fee `0.0`.
+   - KALSHI: base URL `https://external-api.kalshi.com/trade-api/v2` (Prod), `https://external-api.demo.kalshi.co/trade-api/v2` (Demo), WS `wss://external-feeds.kalshi.com/trade-api/v2/external-feeds`.
+   - KALSHI SIGNING: Support Ed25519 and RSA-PSS (`KALSHI-ACCESS-KEY`, `KALSHI-ACCESS-SIGNATURE`, `KALSHI-ACCESS-TIMESTAMP`). Strip all query params from URL path before signing. Use `yes_bid_size_fp` / `yes_ask_size_fp` for top-of-book sizes. Rate-limit balance endpoint to <= 1 req/sec via async token bucket.
+
+3. PHASE-GATED AUTONOMOUS EXECUTION:
+   - Maintain `PROGRESS.md`. Complete Phase 1 -> Phase 7 sequentially per `MASTER_SPEC.md`. Run `pytest` and `ruff`/`mypy` after every phase. Do not stop to ask permission between phases.
+
+4. PAPER-FIRST SAFETY ARCHITECTURE:
+   - `trading.mode` in `config/config.yaml` MUST default to `"paper"`.
+   - Live order routing physically blocked behind dual check: `config.trading.mode == "live"` AND `os.getenv("ALLOW_LIVE_TRADING") == "TRUE"`.
