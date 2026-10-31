@@ -13,6 +13,7 @@ Paper-first: live routing stays blocked behind the dual gate in ``Settings``.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import time
 from typing import Any
@@ -76,6 +77,12 @@ class TradingLoop:
             max_daily_loss_pct=settings.trading.max_daily_loss_pct,
         )
         self.strategies = self._build_strategies(settings)
+
+        # Out-of-band Telegram alerts for real order fills (throttled to avoid spam).
+        from btc_edge.execution.alerts import build_alerter
+
+        self._alerter = build_alerter(settings)
+        self._last_alert_ts = 0.0
 
         self._windows: dict[tuple[int, str], dict[str, Any]] = {
             (tf, venue): {"window_ts": None, "open_price": None, "last_features": {}}
@@ -438,6 +445,24 @@ class TradingLoop:
             vs = self._venue_stats[venue]
             vs["notional_usd"] += notional
             vs["trades"] += 1
+
+            # Fire a throttled Telegram alert for the real fill.
+            self._maybe_alert_order(venue, d, size, notional)
+
+    def _maybe_alert_order(self, venue: str, d: Any, size: float, notional: float) -> None:
+        """Send a throttled, non-blocking Telegram alert for a real order fill."""
+        if not self._alerter.enabled:
+            return
+        now = time.time()
+        if now - self._last_alert_ts < 30.0:
+            return
+        self._last_alert_ts = now
+        text = (
+            f"📈 BTC-Edge fill: {venue} {d.action} {d.side} {size:g} @ {d.price:.3f} "
+            f"(${notional:.2f}, {d.strategy})"
+        )
+        with contextlib.suppress(Exception):
+            asyncio.create_task(self._alerter.send(text))
 
     def _update_state(self, ctx: MarketContext, decisions: list[Any]) -> None:
         self.state.regime = ctx.regime

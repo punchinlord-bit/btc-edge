@@ -21,6 +21,19 @@ from btc_edge.ml.strategy_registry import Registry
 
 app = FastAPI(title="BTC-Edge Dashboard")
 
+
+@app.middleware("http")
+async def _no_cache_assets(request: Request, call_next):
+    """Never let the browser serve a stale dashboard/chart HTML (this has bitten us
+    repeatedly — users see the old panel after a deploy)."""
+    response = await call_next(request)
+    ctype = response.headers.get("content-type", "")
+    if ctype.startswith("text/html"):
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
+
 TEMPLATE_DIR = Path(__file__).parent / "templates"
 STATIC_DIR = Path(__file__).parent / "static"
 

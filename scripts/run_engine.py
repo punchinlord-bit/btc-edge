@@ -134,6 +134,21 @@ def main() -> int:
     except Exception as exc:  # noqa: BLE001 - registry load is best-effort
         print(f"Strategy registry load skipped: {exc}")
 
+    # Seed a default CHAMPION if none exists so the promotion gate has a baseline.
+    # (The gate never edits live champion weights in place — only CHALLENGERs.)
+    if _registry.champion_id is None:
+        _registry.register_champion(
+            "champion-v1",
+            {
+                "bias": 0.0,
+                "contract_price": 0.6,
+                "option_implied_prob": 0.2,
+                "window_delta_pct": 0.15,
+                "book_imbalance": 0.1,
+                "news_sentiment": 0.05,
+            },
+        )
+
     # Build the news-intelligence pipeline.
     scraper = NewsScraper(
         min_relevance=settings.news.min_relevance,
