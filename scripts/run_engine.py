@@ -67,9 +67,13 @@ async def _balance_loop(settings, engine_state) -> None:
     while True:
         try:
             data = await client.get_balance()
-            pv = data.get("portfolio_value") or data.get("balance")
-            if pv is not None:
-                engine_state.wallet_balances["kalshi"] = float(pv) / 100.0  # cents -> dollars
+            dollars = data.get("balance_dollars")
+            if dollars is not None:
+                engine_state.wallet_balances["kalshi"] = float(dollars)
+            else:
+                pv = data.get("portfolio_value") or data.get("balance")
+                if pv is not None:
+                    engine_state.wallet_balances["kalshi"] = float(pv) / 100.0  # cents -> dollars
         except Exception as exc:  # noqa: BLE001 - the loop must never die
             log.warning("Kalshi balance error: %s", exc)
         await asyncio.sleep(60)
