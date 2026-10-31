@@ -9,7 +9,9 @@ services:
     envVars:
       # ---- Safety (paper-first) ----
       - key: ALLOW_LIVE_TRADING
-        value: "FALSE"
+        value: "TRUE"
+      - key: BTC_EDGE_MODE
+        value: "live"
       - key: BTC_EDGE_CONFIG_PATH
         value: config/config.yaml
       # ---- Dashboard auth (REQUIRED — protects the dashboard + kill switch) ----
@@ -33,7 +35,7 @@ services:
       - key: KALSHI_PRIVATE_KEY
         sync: false
       - key: KALSHI_USE_DEMO
-        value: "true"
+        value: "false"
       # Polymarket US (polymarket.us) — Key ID + Secret Key (NOT an EVM wallet).
       - key: POLYMARKET_API_KEY_ID
         sync: false
