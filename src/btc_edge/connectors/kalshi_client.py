@@ -265,6 +265,37 @@ class KalshiClient:
         params = {"ticker": ticker} if ticker else None
         return await self._request("GET", "/portfolio/orders", params=params)
 
+    async def get_fills(
+        self,
+        ticker: str | None = None,
+        limit: int = 100,
+        cursor: str | None = None,
+        min_ts: int | None = None,
+        max_ts: int | None = None,
+    ) -> dict[str, Any]:
+        """Fetch personal filled-order history (trade history).
+
+        Used to review past trades for patterns/bias and to build a validated
+        record for the model. Paginate with ``cursor`` from a prior response.
+        """
+        params: dict[str, Any] = {"limit": limit}
+        if ticker:
+            params["ticker"] = ticker
+        if cursor:
+            params["cursor"] = cursor
+        if min_ts is not None:
+            params["min_ts"] = min_ts
+        if max_ts is not None:
+            params["max_ts"] = max_ts
+        return await self._request("GET", "/portfolio/fills", params=params)
+
+    async def get_settlements(self, ticker: str | None = None, limit: int = 100) -> dict[str, Any]:
+        """Fetch settled positions with realized PnL (how past trades actually did)."""
+        params: dict[str, Any] = {"limit": limit}
+        if ticker:
+            params["ticker"] = ticker
+        return await self._request("GET", "/portfolio/settlements", params=params)
+
 
 def parse_orderbook(payload: dict[str, Any], ticker: str) -> KalshiOrderBook:
     """Parse a Kalshi orderbook payload into a normalized structure.

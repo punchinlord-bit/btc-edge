@@ -258,7 +258,7 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
             kalshi_env.strip().lower() in {"true", "1", "yes", "on"}
         )
 
-    settings = Settings(**yaml_data)
+    settings = Settings(_env_file=os.getenv("BTC_EDGE_ENV_FILE", ".env"), **yaml_data)
     settings.config_path = path
     return settings
 
