@@ -13,6 +13,7 @@ Autonomous 7-phase execution tracker. Updated after each phase passes `pytest` +
 | Phase 7 | End-to-end verification & first-run validation report | [x] COMPLETE |
 | Phase 8 | News intelligence & self-healing filter module | [x] COMPLETE |
 | Phase 9 | Always-on deployment, simple UX & safety hardening | [x] COMPLETE |
+| | Phase 10 | Dashboard auth (A1) + professional desktop console | [x] COMPLETE |
 
 ## Verification Log
 
@@ -82,4 +83,23 @@ Implemented the self-learning news module:
 - **Real-data validation**: `scripts/import_predictions.py` forward-tests a live
   prediction log (net EV / win rate / Brier / Sharpe).
 - Full suite: `pytest` (72 passed), `ruff` (clean), `mypy` (no issues in 45 files).
+
+### Phase 10 — Dashboard Auth (A1) & Professional Desktop Console
+- **A1 fixed (Critical)**: `DASHBOARD_API_KEY` shared-secret auth via `require_auth`
+  dependency in `web/app.py`, applied to every `/api/*` route (except the public
+  `/api/health` probe) and `/ws/live`. `render.yaml` + `.env.example` updated;
+  `index.html` prompts once and caches the key in `localStorage`.
+  `tests/test_auth.py` (4 tests) covers enforcement, bypass, and public health.
+- **Professional desktop console**: rewrote `desktop/gui.py` as a polished dark
+  PySide6 panel (live mode/regime/status badges, sentiment + at-risk + open-strike
+  + countdown metrics card, strategy net-EV/win-rate table, signals feed, system
+  tray, "Open Dashboard" launcher) wired to a new testable
+  `desktop/automation.py` (`OperatorActions`: halt/resume/snapshot + app-level
+  `Ctrl+Shift+K` / `Ctrl+Shift+R` safety hotkeys). `scripts/run_desktop.py` now
+  binds the persisted kill switch + configured dashboard URL.
+- `tests/test_desktop.py` (5 tests) — halt/resume persistence, snapshot, hotkeys,
+  and the >$50 confirmation gate.
+- Full suite: `pytest` (87 passed), `ruff` (clean). PySide6 6.12 installed into
+  the venv so `python scripts/run_desktop.py` launches natively.
+
 
