@@ -1,7 +1,7 @@
 trading:
   mode: "paper"                 # MUST default to "paper". Live requires ALLOW_LIVE_TRADING=TRUE.
   base_currency: "USD"
-  bankroll: 10000.0
+  bankroll: 100.0
   max_daily_loss_pct: 5.0       # circuit breaker: halt if daily loss exceeds this % of bankroll
   quarter_kelly_cap_pct: 10.0   # per-trade max risk, capped at 10% of bankroll
   min_ev_threshold: 0.01        # minimum expected-value edge (net of fees) before firing
@@ -81,7 +81,7 @@ news:
   promote_threshold: 0.55
 
 ai:
-  enabled: true
+  enabled: false   # no LLM token spend by default (offline fallback used)
   base_url: "https://api.deepseek.com/v1"   # ChatGPT: https://api.openai.com/v1
   model: "deepseek-chat"                    # ChatGPT: gpt-4o-mini
 

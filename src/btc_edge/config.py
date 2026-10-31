@@ -26,7 +26,7 @@ DEFAULT_CONFIG_PATH = Path("config/config.yaml")
 class TradingConfig(BaseModel):
     mode: Literal["paper", "live"] = "paper"
     base_currency: str = "USD"
-    bankroll: float = 10000.0
+    bankroll: float = 100.0
     max_daily_loss_pct: float = 5.0
     quarter_kelly_cap_pct: float = 10.0
     min_ev_threshold: float = 0.01

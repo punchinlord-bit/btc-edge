@@ -150,6 +150,11 @@ class AIAssistant:
 def build_assistant(settings) -> AIAssistant:
     import os
 
+    # Respect ``ai.enabled``: when disabled, never make a paid LLM call — force
+    # the deterministic offline renderer (no token drain).
+    if not getattr(settings.ai, "enabled", True):
+        return AIAssistant(base_url=settings.ai.base_url, api_key="", model=settings.ai.model)
+
     # base_url / model are overridable via env so one key works with either
     # provider (e.g. DeepSeek: AI_BASE_URL=https://api.deepseek.com/v1,
     # AI_MODEL=deepseek-chat), falling back to config.yaml.
