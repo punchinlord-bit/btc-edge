@@ -99,7 +99,14 @@ Implemented the self-learning news module:
   binds the persisted kill switch + configured dashboard URL.
 - `tests/test_desktop.py` (5 tests) — halt/resume persistence, snapshot, hotkeys,
   and the >$50 confirmation gate.
-- Full suite: `pytest` (87 passed), `ruff` (clean). PySide6 6.12 installed into
-  the venv so `python scripts/run_desktop.py` launches natively.
+- **Mouse automation**: `desktop/mouse_automation.py` (`MouseAutomation`,
+  `DashboardMouseActions`, `MouseAction`, `locate_center`) — safe, testable
+  PyAutoGUI primitives (move/click/double-click/scroll) with an optional
+  pixel "safe zone" that blocks out-of-bounds actions, plus
+  `scripts/run_mouse.py` CLI. `tests/test_mouse_automation.py` (8 tests) uses an
+  injected fake backend so it runs without moving the real cursor.
+- Full suite: `pytest` (95 passed), `ruff` (clean). PySide6 6.12 and pyautogui
+  0.9.54 installed into the venv so `python scripts/run_desktop.py` and
+  `python scripts/run_mouse.py` run natively.
 
 
