@@ -42,7 +42,6 @@ class LateScalpStrategy(Strategy):
                 Condition(Operand("contract_price"), ">=", Operand.literal(self.min_prob)),
                 Condition(Operand("contract_price"), "<=", Operand.literal(self.max_prob)),
                 Condition(Operand("window_delta_pct"), ">=", Operand.literal(self.min_window_delta_pct)),
-                Condition(Operand("regime_dampening"), "==", Operand.literal(1.0)),
             ],
         )
 

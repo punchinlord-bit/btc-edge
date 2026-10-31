@@ -53,10 +53,10 @@ def test_late_scalp_ignores_outside_window():
     assert strat.evaluate(ctx) == []
 
 
-def test_late_scalp_requires_dampening():
+def test_late_scalp_fires_regardless_of_regime():
     strat = LateScalpStrategy()
     ctx = make_context(time_remaining=50.0, regime="AMPLIFYING")
-    assert strat.evaluate(ctx) == []
+    assert len(strat.evaluate(ctx)) >= 1
 
 
 # ------------------------------------------------------------ market maker

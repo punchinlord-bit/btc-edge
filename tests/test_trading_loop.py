@@ -24,9 +24,11 @@ def test_builds_all_strategies():
 
 
 def test_trading_windows_are_5m_and_15m():
-    tfs = {tf for tf, _, _ in TRADING_WINDOWS}
-    assert tfs == {300, 900}
-    assert {v for _, v, _ in TRADING_WINDOWS} == {"polymarket", "kalshi"}
+    assert set(TRADING_WINDOWS) == {
+        (300, "polymarket", "5m"),
+        (900, "polymarket", "15m"),
+        (900, "kalshi", "15m"),
+    }
 
 
 def test_build_context_uses_live_data():
@@ -52,7 +54,7 @@ def test_settle_positions_buy_up_win():
         "side": "up", "action": "buy", "price": 0.9, "size": 5.0,
         "fee": 0.0, "strategy": "late_scalp", "prob": 0.95,
     }]
-    pnl = loop._settle_positions(300, outcome=1.0)
+    pnl = loop._settle_positions(300, "polymarket", outcome=1.0)
     assert pnl == (1.0 - 0.9) * 5.0
     assert loop._open == []
 
@@ -65,7 +67,7 @@ def test_settle_positions_buy_down_loss():
         "fee": 0.0, "strategy": "crowd_follow", "prob": 0.6,
     }]
     # outcome=1 (up) means "down" loses: payoff = 0.0
-    pnl = loop._settle_positions(300, outcome=1.0)
+    pnl = loop._settle_positions(300, "polymarket", outcome=1.0)
     assert pnl == (0.0 - 0.4) * 5.0
 
 

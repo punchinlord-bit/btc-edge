@@ -34,10 +34,13 @@ from btc_edge.web.live_feed import LiveMarketFeed
 
 logger = logging.getLogger(__name__)
 
-# (timeframe_seconds, venue, countdown_label). 5m trades on Polymarket, 15m on
-# Kalshi — the bot actively trades BOTH windows every cycle.
+# (timeframe_seconds, venue, countdown_label). The bot actively trades every
+# window: 5m on Polymarket, 15m on BOTH Polymarket and Kalshi. Each
+# (venue, timeframe) pair trains its own ensemble so the model tracks each
+# market independently.
 TRADING_WINDOWS: tuple[tuple[int, str, str], ...] = (
     (300, "polymarket", "5m"),
+    (900, "polymarket", "15m"),
     (900, "kalshi", "15m"),
 )
 IMPLIED_VOL_DEFAULT = 0.5  # annualized BTC IV proxy when Deribit DVOL is unavailable
@@ -51,7 +54,9 @@ class TradingLoop:
         self.state = state
         self.settings = settings
         self.feed = feed
-        self.ensemble = ProbabilityEnsemble()
+        self._ensembles: dict[tuple[int, str], ProbabilityEnsemble] = {
+            (tf, venue): ProbabilityEnsemble() for tf, venue, _ in TRADING_WINDOWS
+        }
         self.regime_cls = RegimeClassifier(
             rv_iv_threshold=settings.features.vol_rv_iv_threshold,
             funding_zscore_threshold=settings.features.funding_zscore_threshold,
@@ -63,9 +68,9 @@ class TradingLoop:
         )
         self.strategies = self._build_strategies(settings)
 
-        self._windows: dict[int, dict[str, Any]] = {
-            tf: {"window_ts": None, "open_price": None, "last_features": {}}
-            for tf, _, _ in TRADING_WINDOWS
+        self._windows: dict[tuple[int, str], dict[str, Any]] = {
+            (tf, venue): {"window_ts": None, "open_price": None, "last_features": {}}
+            for tf, venue, _ in TRADING_WINDOWS
         }
         self._open: list[dict[str, Any]] = []
         self._total_pnl = 0.0
@@ -122,40 +127,41 @@ class TradingLoop:
         from btc_edge.connectors.poly_client import compute_window_ts
 
         spot = self.state.btc_price
-        for tf, _, _ in TRADING_WINDOWS:
-            w = self._windows[tf]
+        for tf, venue, _ in TRADING_WINDOWS:
+            w = self._windows[(tf, venue)]
             window_ts = compute_window_ts(now, tf)
             if w["window_ts"] is None:
                 w["window_ts"] = window_ts
                 w["open_price"] = spot
                 continue
             if window_ts != w["window_ts"]:
-                self._settle_window(tf)
+                self._settle_window(tf, venue)
                 w["window_ts"] = window_ts
                 w["open_price"] = spot
 
-    def _settle_window(self, tf: int) -> None:
-        w = self._windows[tf]
+    def _settle_window(self, tf: int, venue: str) -> None:
+        w = self._windows[(tf, venue)]
         spot = self.state.btc_price
         open_price = w["open_price"]
         if spot is None or open_price is None or open_price <= 0:
-            self._open = [p for p in self._open if p.get("tf") != tf]
+            self._open = [p for p in self._open if not (p.get("tf") == tf and p.get("venue") == venue)]
             return
         outcome = 1.0 if spot >= open_price else 0.0
-        pnl = self._settle_positions(tf, outcome)
+        pnl = self._settle_positions(tf, venue, outcome)
         if w["last_features"]:
-            self.ensemble.update(w["last_features"], outcome, tf)
-            self.ensemble.retrain_lgbm()
+            ens = self._ensembles[(tf, venue)]
+            ens.update(w["last_features"], outcome, tf)
+            ens.retrain_lgbm()
         self._total_pnl += pnl
         self._equity_curve.append((time.time(), self._total_pnl))
         if len(self._equity_curve) > 200:
             self._equity_curve = self._equity_curve[-200:]
 
-    def _settle_positions(self, tf: int, outcome: float) -> float:
+    def _settle_positions(self, tf: int, venue: str, outcome: float) -> float:
         pnl = 0.0
         remaining: list[dict[str, Any]] = []
         for pos in self._open:
-            if pos.get("tf") != tf:
+            if pos.get("tf") != tf or pos.get("venue") != venue:
                 remaining.append(pos)
                 continue
             payoff = outcome if pos["side"] == "up" else (1.0 - outcome)
@@ -195,7 +201,7 @@ class TradingLoop:
         from btc_edge.connectors.poly_client import compute_window_ts
 
         window_ts = compute_window_ts(now, tf)
-        w = self._windows[tf]
+        w = self._windows[(tf, venue)]
         open_price = w["open_price"] if w["open_price"] else spot
         time_remaining = self.state.window_countdowns.get(label, float(tf))
 
@@ -232,7 +238,7 @@ class TradingLoop:
             "regime_dampening": 1.0 if regime_str == "DAMPENING" else 0.0,
             "regime_amplifying": 1.0 if regime_str == "AMPLIFYING" else 0.0,
         }
-        prob = self.ensemble.predict(feats, tf)
+        prob = self._ensembles[(tf, venue)].predict(feats, tf)
         w["last_features"] = feats
 
         # Synthetic 2-cent book around the market mid (no live CLOB stream yet).

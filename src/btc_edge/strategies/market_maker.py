@@ -34,7 +34,6 @@ class MarketMakerStrategy(Strategy):
             logical_op="AND",
             conditions=[
                 Condition(Operand("time_remaining"), ">", Operand.literal(self.min_time_remaining)),
-                Condition(Operand("regime_dampening"), "==", Operand.literal(1.0)),
             ],
         )
 
