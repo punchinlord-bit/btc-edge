@@ -197,12 +197,17 @@ class KalshiClient:
     ) -> None:
         self.signer = signer
         self.base_url = base_url.rstrip("/")
+        # The base URL already contains "/trade-api/v2"; extract that path prefix
+        # so the signature covers the FULL path (Kalshi signs the whole path).
+        from urllib.parse import urlparse
+
+        self._base_path = urlparse(base_url).path.rstrip("/") or ""
         self._bucket = TokenBucket(rate_limit_balance_per_sec)
 
     def _signed_headers(self, method: str, path: str) -> dict[str, str]:
         if self.signer is None:
             return {}
-        return self.signer.sign(method, path).headers
+        return self.signer.sign(method, self._base_path + path).headers
 
     async def _request(
         self,
@@ -252,21 +257,26 @@ class KalshiClient:
         side: str,  # yes | no
         action: str,  # buy | sell
         count: int,
-        price: float,
+        price: float,  # dollars (0..1)
         order_type: str = "limit",
         post_only: bool = False,
     ) -> dict[str, Any]:
+        # Convert legacy (side=yes/no, action=buy/sell) to V2 (side=bid/ask).
+        # "bid" = buy YES (long yes); "ask" = sell YES (long no). Price is quoted
+        # in YES-leg fixed-point dollars.
+        long_yes = (action == "buy" and side == "yes") or (action == "sell" and side == "no")
+        v2_side = "bid" if long_yes else "ask"
+        yes_price = price if side == "yes" else (1.0 - price)
         body = {
-            "market_ticker": ticker,
-            "side": side,
-            "action": action,
-            "count": count,
-            "type": order_type,
+            "ticker": ticker,
+            "side": v2_side,
+            "count": str(count),
+            "price": f"{yes_price:.4f}",
+            "time_in_force": "good_till_canceled" if order_type == "limit" else "immediate_or_cancel",
+            "self_trade_prevention_type": "maker",
             "client_order_id": _client_order_id(ticker, side, action, count, price),
+            "post_only": bool(post_only),
         }
-        if order_type == "limit":
-            body["yes_price"] = int(round(price * 100))  # cents
-            body["post_only"] = post_only
         return await self._request("POST", "/portfolio/events/orders", json_body=body)
 
     async def cancel_order(self, order_id: str) -> dict[str, Any]:
@@ -435,9 +445,9 @@ def resolve_btc_markets(
             continue
         strike = float(strike)
 
-        # Skip markets that have already closed/settled.
+        # Skip markets that have already closed/settled or aren't open yet.
         status = (m.get("status") or "").lower()
-        if status in {"closed", "finalized", "settled"}:
+        if status in {"closed", "finalized", "settled", "initialized"}:
             continue
 
         close = m.get("close_time")
