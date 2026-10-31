@@ -94,6 +94,15 @@
 
   <script>
     let chart = null;
+    let apiKey = localStorage.getItem('btcApiKey') || '';
+    function apiHeaders() {
+      return apiKey ? { 'X-API-Key': apiKey } : {};
+    }
+    function ensureKey() {
+      if (apiKey) return;
+      const k = prompt('Enter the dashboard API key (DASHBOARD_API_KEY):');
+      if (k) { apiKey = k.trim(); localStorage.setItem('btcApiKey', apiKey); }
+    }
     function initChart() {
       const ctx = document.getElementById('equity-chart').getContext('2d');
       chart = new Chart(ctx, {
@@ -147,27 +156,30 @@
     async function poll() {
       try {
         const [m, o, st] = await Promise.all([
-          fetch('/api/metrics').then(r => r.json()),
-          fetch('/api/overview').then(r => r.json()),
-          fetch('/api/status').then(r => r.json()),
+          fetch('/api/metrics', { headers: apiHeaders() }).then(r => r.json()),
+          fetch('/api/overview', { headers: apiHeaders() }).then(r => r.json()),
+          fetch('/api/status', { headers: apiHeaders() }).then(r => r.json()),
         ]);
         render(Object.assign({}, m, o, st));
       } catch (e) { /* ignore */ }
     }
 
     document.getElementById('halt-btn').addEventListener('click', async () => {
-      await fetch('/api/halt', { method: 'POST' });
+      ensureKey();
+      await fetch('/api/halt', { method: 'POST', headers: apiHeaders() });
       poll();
     });
     document.getElementById('resume-btn').addEventListener('click', async () => {
-      await fetch('/api/start', { method: 'POST' });
+      ensureKey();
+      await fetch('/api/start', { method: 'POST', headers: apiHeaders() });
       poll();
     });
     document.getElementById('ask-ai').addEventListener('click', async () => {
+      ensureKey();
       const out = document.getElementById('ai-output');
       out.textContent = 'Thinking…';
       try {
-        const r = await fetch('/api/assistant', { method: 'POST' });
+        const r = await fetch('/api/assistant', { method: 'POST', headers: apiHeaders() });
         const d = await r.json();
         out.textContent = d.text;
       } catch (e) {
@@ -175,6 +187,7 @@
       }
     });
 
+    ensureKey();
     initChart();
     poll();
     setInterval(poll, 1000);

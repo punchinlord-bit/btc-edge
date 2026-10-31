@@ -12,6 +12,9 @@ services:
         value: "FALSE"
       - key: BTC_EDGE_CONFIG_PATH
         value: config/config.yaml
+      # ---- Dashboard auth (REQUIRED — protects the dashboard + kill switch) ----
+      - key: DASHBOARD_API_KEY
+        sync: false
       # ---- AI assistant (read-only) — ChatGPT or DeepSeek ----
       - key: AI_API_KEY
         sync: false

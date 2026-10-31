@@ -202,6 +202,7 @@ class Settings(BaseSettings):
     # Environment-only overrides (also read from .env).
     allow_live_trading: bool = Field(default=False, alias="ALLOW_LIVE_TRADING")
     ai_api_key: str = Field(default="", alias="AI_API_KEY")
+    dashboard_api_key: str = Field(default="", alias="DASHBOARD_API_KEY")
     telegram_bot_token: str = Field(default="", alias="TELEGRAM_BOT_TOKEN")
     telegram_chat_id: str = Field(default="", alias="TELEGRAM_CHAT_ID")
     kalshi_api_key_id: str = Field(default="", alias="KALSHI_API_KEY_ID")

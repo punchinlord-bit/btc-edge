@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -26,6 +27,18 @@ STATIC_DIR = Path(__file__).parent / "static"
 # missing favicon/banner (they're cosmetic — the API + health check are core).
 if STATIC_DIR.is_dir():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+
+def require_auth(x_api_key: str | None = Header(default=None)) -> None:
+    """Require a shared API key on protected endpoints.
+
+    Reads ``DASHBOARD_API_KEY`` fresh from the environment so it can be set at
+    deploy time. When the key is unset (local development) auth is skipped; in
+    production it MUST be set.
+    """
+    expected = os.getenv("DASHBOARD_API_KEY", "")
+    if expected and x_api_key != expected:
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
 
 class EngineState:
@@ -87,7 +100,7 @@ def _apply_kill(armed: bool, source: str) -> None:
         _audit.record("kill_switch", armed=False, source=source)
 
 
-@app.get("/api/status")
+@app.get("/api/status", dependencies=[Depends(require_auth)])
 def status() -> JSONResponse:
     return JSONResponse({
         "mode": engine_state.mode,
@@ -100,16 +113,11 @@ def status() -> JSONResponse:
 
 @app.get("/api/health")
 def health() -> JSONResponse:
-    """Liveness/readiness probe for Render and load balancers."""
-    return JSONResponse({
-        "status": "ok",
-        "mode": engine_state.mode,
-        "kill_switch": engine_state.kill_switch,
-        "uptime_seconds": time.time() - _boot_ts,
-    })
+    """Liveness/readiness probe for Render (public, minimal output)."""
+    return JSONResponse({"status": "ok"})
 
 
-@app.get("/api/metrics")
+@app.get("/api/metrics", dependencies=[Depends(require_auth)])
 def metrics() -> JSONResponse:
     return JSONResponse({
         "window_countdowns": engine_state.window_countdowns,
@@ -120,7 +128,7 @@ def metrics() -> JSONResponse:
     })
 
 
-@app.get("/api/overview")
+@app.get("/api/overview", dependencies=[Depends(require_auth)])
 def overview() -> JSONResponse:
     """Single plain-English snapshot for a layperson."""
     sentiment = engine_state.news_sentiment
@@ -151,12 +159,12 @@ def _advice_text(sentiment: float, regime: str, killed: bool) -> str:
     return "No strong signal. The bot is waiting for a setup."
 
 
-@app.get("/api/signals")
+@app.get("/api/signals", dependencies=[Depends(require_auth)])
 def signals() -> JSONResponse:
     return JSONResponse({"signals": engine_state.signals})
 
 
-@app.get("/api/news")
+@app.get("/api/news", dependencies=[Depends(require_auth)])
 def news() -> JSONResponse:
     return JSONResponse({
         "sentiment": engine_state.news_sentiment,
@@ -164,30 +172,30 @@ def news() -> JSONResponse:
     })
 
 
-@app.post("/api/assistant")
+@app.post("/api/assistant", dependencies=[Depends(require_auth)])
 async def assistant() -> JSONResponse:
     reply = await _assistant.explain(engine_state.snapshot())
     return JSONResponse({"text": reply.text, "backend": reply.backend})
 
 
-@app.post("/api/start")
+@app.post("/api/start", dependencies=[Depends(require_auth)])
 def start() -> JSONResponse:
     _apply_kill(False, "dashboard")
     return JSONResponse({"kill_switch": False, "message": "Engine resumed"})
 
 
-@app.post("/api/halt")
+@app.post("/api/halt", dependencies=[Depends(require_auth)])
 def halt() -> JSONResponse:
     _apply_kill(True, "dashboard")
     return JSONResponse({"kill_switch": True, "message": "Emergency kill switch engaged"})
 
 
-@app.post("/api/kill-switch")
+@app.post("/api/kill-switch", dependencies=[Depends(require_auth)])
 def kill_switch() -> JSONResponse:
     return halt()
 
 
-@app.post("/api/kill-switch/reset")
+@app.post("/api/kill-switch/reset", dependencies=[Depends(require_auth)])
 def kill_switch_reset() -> JSONResponse:
     return start()
 
@@ -209,7 +217,11 @@ def favicon() -> FileResponse:
 
 
 @app.websocket("/ws/live")
-async def ws_live(ws: WebSocket) -> None:
+async def ws_live(ws: WebSocket, x_api_key: str | None = Header(default=None)) -> None:
+    expected = os.getenv("DASHBOARD_API_KEY", "")
+    if expected and x_api_key != expected:
+        await ws.close(code=1008)  # policy violation
+        return
     await ws.accept()
     try:
         while True:
