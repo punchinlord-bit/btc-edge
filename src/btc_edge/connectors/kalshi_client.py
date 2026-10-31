@@ -242,9 +242,9 @@ class KalshiClient:
         return await self._request("GET", "/markets", params=params)
 
     async def get_btc_markets(self) -> list[dict[str, Any]]:
-        """Fetch the full KXBTC series (daily above/below price-range markets)."""
+        """Fetch the KXBTC15M series (15-minute BTC up/down markets)."""
         data = await self._request(
-            "GET", "/markets", params={"series_ticker": "KXBTC", "limit": 200}
+            "GET", "/markets", params={"series_ticker": "KXBTC15M", "limit": 200}
         )
         return data.get("markets", []) if isinstance(data, dict) else []
 
@@ -468,5 +468,41 @@ def resolve_btc_markets(
             if below is None or (ref is not None and abs(strike - current_price) < abs(ref - current_price)):
                 below = m
     return above, below
+
+
+def _parse_ts(value: Any) -> float | None:
+    from datetime import datetime
+
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).timestamp()
+    except (ValueError, TypeError):
+        return None
+
+
+def resolve_btc_15m_market(
+    markets: list[dict[str, Any]], now_ts: float | None = None
+) -> dict[str, Any] | None:
+    """Pick the current (open) KXBTC15M 15-minute window, else the nearest future one.
+
+    ``KXBTC15M`` markets are "BTC price up in next 15 mins?" — a pure up/down
+    binary (no strike). Return the market whose ``[open_time, close_time)``
+    contains now; if none is open yet, return the soonest-to-open window.
+    """
+    now = now_ts if now_ts is not None else time.time()
+    active: dict[str, Any] | None = None
+    future: dict[str, Any] | None = None
+    for m in markets:
+        open_ts = _parse_ts(m.get("open_time"))
+        close_ts = _parse_ts(m.get("close_time"))
+        if open_ts is not None and close_ts is not None and open_ts <= now < close_ts:
+            active = m
+            break
+        if open_ts is not None and open_ts > now and (
+            future is None or open_ts < (_parse_ts(future.get("open_time")) or float("inf"))
+        ):
+            future = m
+    return active or future
 
 

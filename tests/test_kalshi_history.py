@@ -54,7 +54,7 @@ def test_get_btc_markets_uses_series_ticker(monkeypatch):
     asyncio.run(client.get_btc_markets())
     assert calls[0][0] == "GET"
     assert calls[0][1] == "/markets"
-    assert calls[0][2]["series_ticker"] == "KXBTC"
+    assert calls[0][2]["series_ticker"] == "KXBTC15M"
 
 
 def test_resolve_btc_markets_picks_nearest():
@@ -85,3 +85,33 @@ def test_resolve_btc_markets_skips_expired():
     ]
     above, _ = resolve_btc_markets(markets, current_price=77300)
     assert above is not None and above["ticker"] == "KXBTC-X-T100000"
+
+
+def test_resolve_btc_15m_market_picks_active_window():
+    from btc_edge.connectors.kalshi_client import resolve_btc_15m_market
+
+    markets = [
+        {"ticker": "KXBTC15M-PAST", "open_time": "2026-01-01T00:00:00Z",
+         "close_time": "2026-01-01T00:15:00Z"},
+        {"ticker": "KXBTC15M-ACTIVE", "open_time": "2026-01-01T00:15:00Z",
+         "close_time": "2026-01-01T00:30:00Z"},
+        {"ticker": "KXBTC15M-FUTURE", "open_time": "2026-01-01T00:30:00Z",
+         "close_time": "2026-01-01T00:45:00Z"},
+    ]
+    now = 1767226800.0  # 2026-01-01T00:20:00Z (inside ACTIVE window)
+    m = resolve_btc_15m_market(markets, now_ts=now)
+    assert m is not None and m["ticker"] == "KXBTC15M-ACTIVE"
+
+
+def test_resolve_btc_15m_market_falls_back_to_future():
+    from btc_edge.connectors.kalshi_client import resolve_btc_15m_market
+
+    markets = [
+        {"ticker": "KXBTC15M-PAST", "open_time": "2026-01-01T00:00:00Z",
+         "close_time": "2026-01-01T00:15:00Z"},
+        {"ticker": "KXBTC15M-FUTURE", "open_time": "2026-01-01T00:30:00Z",
+         "close_time": "2026-01-01T00:45:00Z"},
+    ]
+    now = 1767226800.0  # 2026-01-01T00:20:00Z (PAST closed at 00:15, only FUTURE remains)
+    m = resolve_btc_15m_market(markets, now_ts=now)
+    assert m is not None and m["ticker"] == "KXBTC15M-FUTURE"

@@ -108,42 +108,35 @@ class LiveMarketFeed:
         return out
 
     async def fetch_kalshi(self) -> dict[str, Any]:
-        from datetime import datetime
-
-        from btc_edge.connectors.kalshi_client import KalshiClient, resolve_btc_markets
+        from btc_edge.connectors.kalshi_client import (
+            KalshiClient,
+            _parse_ts,
+            resolve_btc_15m_market,
+        )
 
         client = KalshiClient(signer=None, base_url=self.kalshi_base_url)
         markets = await client.get_btc_markets()
-        btc = self.state.btc_price
-        if not markets or btc is None:
+        if not markets:
             return {}
 
-        above, below = resolve_btc_markets(markets, btc)
-        if above is None:
+        m = resolve_btc_15m_market(markets)
+        if m is None:
             return {}
 
-        def mid(m: dict[str, Any]) -> float | None:
-            bid = to_probability(m.get("yes_bid_dollars"))
-            ask = to_probability(m.get("yes_ask_dollars"))
-            if bid is not None and ask is not None:
-                return (bid + ask) / 2.0
-            return to_probability(m.get("last_price_dollars"))
-
-        close_ts: float | None = None
-        close = above.get("close_time")
-        if close:
-            try:
-                close_ts = datetime.fromisoformat(str(close).replace("Z", "+00:00")).timestamp()
-            except (ValueError, TypeError):
-                close_ts = None
+        bid = to_probability(m.get("yes_bid_dollars"))
+        ask = to_probability(m.get("yes_ask_dollars"))
+        last = to_probability(m.get("last_price_dollars"))
+        prob: float | None = None
+        if bid is not None and ask is not None:
+            prob = (bid + ask) / 2.0
+        elif last is not None:
+            prob = last
 
         return {
-            "ticker": above.get("ticker"),
-            "strike": above.get("floor_strike"),
-            "prob_up": mid(above),
-            "prob_down": mid(below) if below else None,
-            "below_ticker": below.get("ticker") if below else None,
-            "close_time": close_ts,
+            "ticker": m.get("ticker"),
+            "prob_up": prob,
+            "prob_down": (1.0 - prob) if prob is not None else None,
+            "close_time": _parse_ts(m.get("close_time")),
         }
 
     async def refresh_once(self) -> None:

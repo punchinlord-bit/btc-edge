@@ -27,7 +27,7 @@ def test_trading_windows_are_5m_and_15m():
     assert set(TRADING_WINDOWS) == {
         (300, "polymarket", "5m"),
         (900, "polymarket", "15m"),
-        (86400, "kalshi", "1d"),
+        (900, "kalshi", "15m"),
     }
 
 

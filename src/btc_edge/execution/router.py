@@ -155,8 +155,8 @@ class Router:
     ) -> None:
         """Submit a real order to the exchange (awaited async)."""
         if venue == "kalshi" and self.kalshi_client is not None:
-            # "up" -> buy YES on the above-strike market; "down" -> buy NO on it
-            # (equivalent to YES on the below-strike market).
+            # KXBTC15M is "BTC price up in next 15 mins?" — a pure up/down binary.
+            # "up" -> buy YES; "down" -> buy NO (sell YES).
             side = "yes" if decision.side == "up" else "no"
             await self.kalshi_client.place_order(
                 ticker=kalshi_ticker or self.settings.kalshi.market_ticker,
