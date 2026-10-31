@@ -47,6 +47,9 @@ btc-edge-backtest = "btc_edge.backtest.report:cli"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools]
+include-package-data = true
+
 [tool.setuptools.package-data]
 "btc_edge.web" = ["templates/*.html", "static/*"]
 

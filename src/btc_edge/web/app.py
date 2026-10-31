@@ -22,7 +22,10 @@ app = FastAPI(title="BTC-Edge Dashboard")
 TEMPLATE_DIR = Path(__file__).parent / "templates"
 STATIC_DIR = Path(__file__).parent / "static"
 
-app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+# Mount static assets only if bundled; the dashboard must never crash on a
+# missing favicon/banner (they're cosmetic — the API + health check are core).
+if STATIC_DIR.is_dir():
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
 class EngineState:
@@ -191,13 +194,18 @@ def kill_switch_reset() -> JSONResponse:
 
 @app.get("/", response_class=HTMLResponse)
 def index() -> HTMLResponse:
-    html = (TEMPLATE_DIR / "index.html").read_text(encoding="utf-8")
-    return HTMLResponse(html)
+    path = TEMPLATE_DIR / "index.html"
+    if not path.exists():
+        return HTMLResponse("<html><body><h1>BTC-Edge</h1><p>Dashboard template missing.</p></body></html>")
+    return HTMLResponse(path.read_text(encoding="utf-8"))
 
 
 @app.get("/favicon.ico", include_in_schema=False)
 def favicon() -> FileResponse:
-    return FileResponse(STATIC_DIR / "favicon.ico")
+    icon = STATIC_DIR / "favicon.ico"
+    if not icon.exists():
+        return FileResponse(icon, status_code=404)
+    return FileResponse(icon)
 
 
 @app.websocket("/ws/live")

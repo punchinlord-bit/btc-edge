@@ -1,0 +1,3 @@
+include pyproject.toml README.md
+recursive-include src/btc_edge/web/static *
+recursive-include src/btc_edge/web/templates *
