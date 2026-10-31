@@ -88,6 +88,10 @@ class TradingLoop:
             for s in self.strategies
         }
         self._recent_trades: list[dict[str, Any]] = []
+        self._venue_stats: dict[str, dict[str, Any]] = {
+            v: {"notional_usd": 0.0, "pnl_usd": 0.0, "trades": 0}
+            for v in ("polymarket", "kalshi")
+        }
 
     def _build_strategies(self, settings: Settings) -> list[Any]:
         s = settings.strategies
@@ -190,6 +194,7 @@ class TradingLoop:
             })
         self._open = remaining
         self._recent_trades = self._recent_trades[-50:]
+        self._venue_stats[venue]["pnl_usd"] += pnl
         self.safety.record_pnl(pnl)
         return pnl
 
@@ -288,6 +293,9 @@ class TradingLoop:
             m["net_ev"] += d.ev_estimate
             m["notional_usd"] += notional
             m["fees_usd"] += fee
+            vs = self._venue_stats[venue]
+            vs["notional_usd"] += notional
+            vs["trades"] += 1
 
     def _update_state(self, ctx: MarketContext, decisions: list[Any]) -> None:
         self.state.regime = ctx.regime
@@ -295,6 +303,7 @@ class TradingLoop:
         self.state.equity_curve = self._equity_curve[-200:]
         self.state.risk["at_risk_usd"] = sum(p["price"] * p["size"] for p in self._open)
         self.state.recent_trades = self._recent_trades[-50:]
+        self.state.venue_stats = self._venue_stats
         self.state.trade_totals = {
             "total_trades": sum(m["trades"] for m in self._metrics.values()),
             "total_notional_usd": sum(m["notional_usd"] for m in self._metrics.values()),

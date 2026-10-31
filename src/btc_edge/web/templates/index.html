@@ -3,142 +3,159 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>BTC-Edge Dashboard</title>
+  <title>⚡ BTC-Edge Dashboard</title>
   <link rel="icon" type="image/png" href="/static/favicon.png" />
-  <link rel="shortcut icon" href="/static/favicon.ico" />
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <style>
     body { background: #0b0f1a; color: #e5e7eb; font-family: ui-sans-serif, system-ui, sans-serif; }
-    .card { background: #131a2a; border: 1px solid #1f2a44; border-radius: 0.75rem; padding: 1rem; }
-    .badge-dampening { background: #064e3b; color: #34d399; }
-    .badge-amplifying { background: #7f1d1d; color: #f87171; }
-    .banner { border: 1px solid #1f2a44; border-radius: 0.75rem; overflow: hidden; }
+    .card { background: #131a2a; border: 1px solid #1f2a44; border-radius: 0.9rem; padding: 1rem; }
+    .widget-title { display:flex; align-items:center; gap:0.5rem; font-size:0.75rem; letter-spacing:0.05em; text-transform:uppercase; color:#9ca3af; margin-bottom:0.6rem; }
+    .pill { padding:0.25rem 0.6rem; border-radius:9999px; font-size:0.75rem; font-weight:600; }
+    .stat-big { font-size:1.6rem; font-weight:800; font-variant-numeric: tabular-nums; }
   </style>
 </head>
-<body class="min-h-screen p-6">
-  <div class="banner mb-6">
-    <img src="/static/banner.png" alt="BTC-Edge" class="w-full h-auto block" />
-  </div>
+<body class="min-h-screen p-4 md:p-6 max-w-7xl mx-auto">
 
-  <header class="flex items-center justify-between mb-6">
-    <h1 class="text-2xl font-bold tracking-tight">BTC-Edge</h1>
-    <div class="flex items-center gap-2">
-      <span id="trade-only" class="px-3 py-1 rounded-full text-xs font-semibold bg-gray-700">trade-only</span>
-      <div id="mode-badge" class="px-3 py-1 rounded-full text-sm font-semibold bg-gray-700">paper</div>
+  <header class="flex flex-wrap items-center justify-between gap-3 mb-6">
+    <div>
+      <h1 class="text-2xl font-bold tracking-tight flex items-center gap-2">⚡ BTC-Edge</h1>
+      <p id="greeting" class="text-sm text-gray-400 cursor-pointer hover:text-gray-200" title="Click to set your name">👋 Good day, Trader</p>
+    </div>
+    <div class="flex items-center gap-2 flex-wrap">
+      <span id="engine-status" class="pill bg-gray-700">⏳ checking…</span>
+      <span id="mode-badge" class="pill bg-gray-700">paper</span>
+      <span id="trade-only" class="pill bg-gray-700">🔐 trade-only</span>
     </div>
   </header>
 
-  <div class="card mb-6 border-yellow-700/50">
-    <h2 class="text-sm uppercase tracking-wide text-gray-400 mb-2">What the bot thinks (plain English)</h2>
-    <p id="advice" class="text-lg">Loading…</p>
-    <div class="mt-3 flex flex-wrap gap-3 text-sm">
-      <span class="px-3 py-1 rounded-full bg-gray-800">At risk: <b id="at-risk">--</b></span>
-      <span class="px-3 py-1 rounded-full bg-gray-800">News tone: <b id="news-tone">--</b></span>
-      <span class="px-3 py-1 rounded-full bg-gray-800">Regime: <b id="regime-text">--</b></span>
+  <section class="mb-6">
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div class="card border-indigo-700/40">
+        <div class="widget-title"><span>🧿</span> Kalshi Wallet</div>
+        <div class="stat-big text-indigo-300" id="wallet-kalshi-balance">--</div>
+        <div class="text-xs text-gray-400 mt-1">balance</div>
+        <div class="mt-3 flex justify-between text-sm">
+          <span class="text-gray-400">P&amp;L <b id="wallet-kalshi-pnl" class="text-gray-300">$0.00</b></span>
+          <span class="text-gray-400"><b id="wallet-kalshi-trades">0</b> trades</span>
+        </div>
+      </div>
+      <div class="card border-purple-700/40">
+        <div class="widget-title"><span>🎯</span> Polymarket Wallet</div>
+        <div class="stat-big text-purple-300" id="wallet-poly-balance">--</div>
+        <div class="text-xs text-gray-400 mt-1">balance</div>
+        <div class="mt-3 flex justify-between text-sm">
+          <span class="text-gray-400">P&amp;L <b id="wallet-poly-pnl" class="text-gray-300">$0.00</b></span>
+          <span class="text-gray-400"><b id="wallet-poly-trades">0</b> trades</span>
+        </div>
+      </div>
+      <div class="card border-emerald-700/40">
+        <div class="widget-title"><span>💰</span> Paper Bankroll</div>
+        <div class="stat-big text-emerald-300" id="wallet-total-bankroll">--</div>
+        <div class="text-xs text-gray-400 mt-1">bankroll</div>
+        <div class="mt-3 flex justify-between text-sm">
+          <span class="text-gray-400">Net P&amp;L <b id="wallet-total-pnl" class="text-gray-300">$0.00</b></span>
+          <span class="text-gray-400">📉 <b id="wallet-total-atrisk">$0.00</b> at risk</span>
+        </div>
+      </div>
     </div>
-  </div>
+  </section>
 
-  <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-    <div class="card md:col-span-2">
+
+  <section class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+    <div class="card">
       <div class="flex items-center justify-between mb-1">
-        <h2 class="text-sm uppercase tracking-wide text-gray-400">Live BTC Price</h2>
+        <div class="widget-title" style="margin-bottom:0"><span>📈</span> BTC Price</div>
         <span id="feed-age" class="text-xs text-gray-500">connecting…</span>
       </div>
-      <div class="text-4xl font-mono font-bold text-green-400"><span id="btc-price">--</span></div>
-      <canvas id="price-chart" height="120"></canvas>
+      <div class="stat-big text-green-400 font-mono" id="btc-price">--</div>
+      <canvas id="price-chart" height="90"></canvas>
     </div>
     <div class="card">
-      <h2 class="text-sm uppercase tracking-wide text-gray-400 mb-2">Polymarket (Up %)</h2>
+      <div class="widget-title"><span>🎯</span> Polymarket Markets</div>
       <div id="poly-markets" class="space-y-3"></div>
-      <h2 class="text-sm uppercase tracking-wide text-gray-400 mb-2 mt-4">Kalshi (Yes %)</h2>
+    </div>
+    <div class="card">
+      <div class="widget-title"><span>🧿</span> Kalshi Market</div>
       <div id="kalshi-meter"></div>
+      <div class="text-xs text-gray-500 mt-3 pt-3 border-t border-gray-800">KXBTC15M · 15-minute window</div>
     </div>
-  </div>
+  </section>
 
-  <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+  <section class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
     <div class="card">
-      <h2 class="text-sm uppercase tracking-wide text-gray-400 mb-2">Window Countdown</h2>
-      <div id="countdowns" class="space-y-1 text-lg font-mono"></div>
+      <div class="widget-title"><span>⏱️</span> Window Countdown</div>
+      <div id="countdowns" class="space-y-1 font-mono"></div>
     </div>
     <div class="card">
-      <h2 class="text-sm uppercase tracking-wide text-gray-400 mb-2">BRTI 60s vs Strike</h2>
-      <div class="text-2xl font-mono"><span id="brti">--</span></div>
-      <div class="text-sm text-gray-400">Strike: <span id="strike">--</span></div>
+      <div class="widget-title"><span>🎯</span> Strike vs Price</div>
+      <div class="stat-big font-mono" id="brti">--</div>
+      <div class="text-sm text-gray-400 mt-1">Strike: <b id="strike" class="text-gray-200">--</b></div>
     </div>
     <div class="card">
-      <h2 class="text-sm uppercase tracking-wide text-gray-400 mb-2">Signals</h2>
+      <div class="widget-title"><span>⚡</span> Signals</div>
       <ul id="signals" class="text-sm space-y-1 list-disc list-inside text-yellow-300"></ul>
     </div>
-  </div>
+  </section>
 
-  <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+  <section class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
     <div class="card">
-      <h2 class="text-sm uppercase tracking-wide text-gray-400 mb-2">Strategy Metrics</h2>
+      <div class="widget-title"><span>🤖</span> Strategy Performance</div>
       <table class="w-full text-sm">
         <thead>
           <tr class="text-gray-400 border-b border-gray-700">
-            <th class="text-left py-1">Strategy</th><th class="text-right">Net EV</th><th class="text-right">Win Rate</th><th class="text-right">Notional $</th><th class="text-right">P&amp;L $</th>
+            <th class="text-left py-1">Strategy</th><th class="text-right">Net EV</th><th class="text-right">Win</th><th class="text-right">Notional</th><th class="text-right">P&amp;L</th>
           </tr>
         </thead>
         <tbody id="strategy-table"></tbody>
       </table>
     </div>
     <div class="card">
-      <h2 class="text-sm uppercase tracking-wide text-gray-400 mb-2">Equity Curve</h2>
+      <div class="widget-title"><span>📊</span> Equity Curve</div>
       <canvas id="equity-chart" height="180"></canvas>
     </div>
-  </div>
+  </section>
 
-  <div class="card mb-6">
-    <div class="flex items-center justify-between mb-3">
-      <h2 class="text-sm uppercase tracking-wide text-gray-400">Trade Activity (real $ amounts)</h2>
-      <span id="engine-status" class="px-3 py-1 rounded-full text-xs font-semibold bg-gray-700">checking…</span>
-    </div>
-    <div class="flex flex-wrap gap-3 text-sm mb-4">
-      <span class="px-3 py-1 rounded-full bg-gray-800">Trades: <b id="total-trades">0</b></span>
-      <span class="px-3 py-1 rounded-full bg-gray-800">Notional: <b id="total-notional">$0.00</b></span>
-      <span class="px-3 py-1 rounded-full bg-gray-800">P&amp;L: <b id="total-pnl" class="text-gray-300">$0.00</b></span>
-      <span class="px-3 py-1 rounded-full bg-gray-800">Fees: <b id="total-fees">$0.00</b></span>
+  <section class="card mb-6">
+    <div class="widget-title"><span>🧾</span> Trade Activity</div>
+    <div class="flex flex-wrap gap-2 text-sm mb-3">
+      <span class="pill bg-gray-800">Trades: <b id="total-trades">0</b></span>
+      <span class="pill bg-gray-800">Notional: <b id="total-notional">$0.00</b></span>
+      <span class="pill bg-gray-800">P&amp;L: <b id="total-pnl">$0.00</b></span>
+      <span class="pill bg-gray-800">Fees: <b id="total-fees">$0.00</b></span>
     </div>
     <div class="overflow-x-auto">
       <table class="w-full text-sm">
         <thead>
           <tr class="text-gray-400 border-b border-gray-700">
-            <th class="text-left py-1">Time</th><th class="text-left">Strategy</th><th class="text-left">Side</th><th class="text-right">Price</th><th class="text-right">Notional $</th><th class="text-right">P&amp;L $</th>
+            <th class="text-left py-1">Time</th><th class="text-left">Venue</th><th class="text-left">Strategy</th><th class="text-left">Side</th><th class="text-right">Price</th><th class="text-right">Notional</th><th class="text-right">P&amp;L</th>
           </tr>
         </thead>
         <tbody id="recent-trades"></tbody>
       </table>
     </div>
-  </div>
+  </section>
 
-  <div class="card mb-6">
+  <section class="card mb-6">
     <div class="flex items-center justify-between mb-2">
-      <h2 class="text-sm uppercase tracking-wide text-gray-400">AI Assistant (read-only — it can never trade)</h2>
-      <button id="ask-ai" class="px-4 py-1 rounded-lg bg-blue-700 hover:bg-blue-600 text-white text-sm font-semibold">Ask the AI</button>
+      <div class="widget-title" style="margin-bottom:0"><span>🤖</span> AI Assistant <span class="normal-case text-gray-500 font-normal">(read-only)</span></div>
+      <button id="ask-ai" class="px-4 py-1 rounded-lg bg-blue-700 hover:bg-blue-600 text-white text-sm font-semibold">Ask</button>
     </div>
-    <div id="ai-output" class="text-sm whitespace-pre-wrap text-gray-200">Press "Ask the AI" for a plain-English explanation of what the bot is doing.</div>
-  </div>
+    <div id="ai-output" class="text-sm whitespace-pre-wrap text-gray-200">Press "Ask" for a plain-English read of what the bot is doing.</div>
+  </section>
 
-  <div class="flex justify-center gap-4">
-    <button id="resume-btn"
-      class="px-10 py-4 rounded-xl bg-green-700 hover:bg-green-600 text-white text-xl font-bold">
-      ▶ RESUME
-    </button>
-    <button id="halt-btn"
-      class="px-10 py-4 rounded-xl bg-red-700 hover:bg-red-600 text-white text-xl font-bold shadow-lg shadow-red-900/50">
-      ■ HALT (KILL SWITCH)
-    </button>
-  </div>
+  <section class="flex justify-center gap-4 mb-6">
+    <button id="resume-btn" class="px-10 py-4 rounded-xl bg-green-700 hover:bg-green-600 text-white text-xl font-bold">▶ RESUME</button>
+    <button id="halt-btn" class="px-10 py-4 rounded-xl bg-red-700 hover:bg-red-600 text-white text-xl font-bold shadow-lg shadow-red-900/50">■ HALT (KILL SWITCH)</button>
+  </section>
+
 
   <script>
     let chart = null;
     let priceChart = null;
     let apiKey = localStorage.getItem('btcApiKey') || '';
-    function apiHeaders() {
-      return apiKey ? { 'X-API-Key': apiKey } : {};
-    }
+    let name = localStorage.getItem('btcName') || '';
+    function apiHeaders() { return apiKey ? { 'X-API-Key': apiKey } : {}; }
     function ensureKey() {
       if (apiKey) return;
       const k = prompt('Enter the dashboard API key (DASHBOARD_API_KEY):');
@@ -157,50 +174,74 @@
       clearTimeout(el._t);
       el._t = setTimeout(() => { el.style.display = 'none'; }, 3000);
     }
+    function money(v) { return (v == null || isNaN(v)) ? '--' : '$' + Number(v).toFixed(2); }
+    function signedMoney(v) {
+      if (v == null || isNaN(v)) return '$0.00';
+      const n = Number(v);
+      return (n >= 0 ? '$' : '-$') + Math.abs(n).toFixed(2);
+    }
+    function pnlClass(v) { return v > 0 ? 'text-green-400' : (v < 0 ? 'text-red-400' : 'text-gray-300'); }
+    function greeting() {
+      const h = new Date().getHours();
+      const tod = h < 12 ? 'Good morning' : (h < 18 ? 'Good afternoon' : 'Good evening');
+      return '👋 ' + tod + (name ? ', ' + name : ', Trader');
+    }
+    document.getElementById('greeting').addEventListener('click', () => {
+      const n = prompt('What should I call you?', name);
+      if (n != null) { name = n.trim(); localStorage.setItem('btcName', name); document.getElementById('greeting').textContent = greeting(); }
+    });
     function initChart() {
       const ctx = document.getElementById('equity-chart').getContext('2d');
-      chart = new Chart(ctx, {
-        type: 'line',
-        data: { labels: [], datasets: [{ label: 'Equity', data: [], borderColor: '#34d399', tension: 0.2, fill: false }] },
-        options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: false } } }
-      });
+      chart = new Chart(ctx, { type: 'line', data: { labels: [], datasets: [{ label: 'Equity', data: [], borderColor: '#34d399', tension: 0.2, fill: false }] }, options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: false } } } });
     }
     function initPriceChart() {
       const ctx = document.getElementById('price-chart').getContext('2d');
-      priceChart = new Chart(ctx, {
-        type: 'line',
-        data: { labels: [], datasets: [{ label: 'BTC', data: [], borderColor: '#4ade80', tension: 0.2, fill: false, pointRadius: 0 }] },
-        options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: false } } }
-      });
+      priceChart = new Chart(ctx, { type: 'line', data: { labels: [], datasets: [{ label: 'BTC', data: [], borderColor: '#4ade80', tension: 0.2, fill: false, pointRadius: 0 }] }, options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: false } } } });
     }
     function pctBar(p, color) {
       if (p == null || isNaN(p)) return '<div class="text-gray-500">--</div>';
       const w = Math.max(0, Math.min(100, p * 100));
-      return `<div class="w-full bg-gray-800 rounded-full h-3"><div class="h-3 rounded-full ${color}" style="width:${w}%"></div></div>`;
+      return '<div class="w-full bg-gray-800 rounded-full h-3"><div class="h-3 rounded-full ' + color + '" style="width:' + w + '%"></div></div>';
+    }
+    function fmtCountdown(sec) {
+      sec = Math.max(0, Math.round(sec));
+      const m = Math.floor(sec / 60), s = sec % 60;
+      return m + ':' + String(s).padStart(2, '0');
     }
 
     function render(s) {
+      document.getElementById('greeting').textContent = greeting();
       document.getElementById('mode-badge').textContent = s.mode;
-      document.getElementById('mode-badge').className = 'px-3 py-1 rounded-full text-sm font-semibold ' + (s.mode === 'live' ? 'bg-red-700' : 'bg-gray-700');
-      document.getElementById('trade-only').className = 'px-3 py-1 rounded-full text-xs font-semibold ' + (s.trade_only_keys ? 'bg-emerald-900 text-emerald-300' : 'bg-red-900 text-red-300');
-      document.getElementById('trade-only').textContent = s.trade_only_keys ? 'trade-only keys ✓' : 'WARNING: withdrawal possible';
+      document.getElementById('mode-badge').className = 'pill ' + (s.mode === 'live' ? 'bg-red-700' : 'bg-gray-700');
+      document.getElementById('trade-only').className = 'pill ' + (s.trade_only_keys ? 'bg-emerald-900 text-emerald-300' : 'bg-red-900 text-red-300');
+      document.getElementById('trade-only').textContent = s.trade_only_keys ? '🔐 trade-only ✓' : '⚠️ withdrawal possible';
 
-      document.getElementById('brti').textContent = s.brti_60s != null ? Number(s.brti_60s).toFixed(2) : '--';
-      document.getElementById('strike').textContent = s.open_strike != null ? Number(s.open_strike).toFixed(2) : '--';
+      const se = document.getElementById('engine-status');
+      if (s.kill_switch) { se.textContent = '🛑 HALTED'; se.className = 'pill bg-red-900 text-red-300'; }
+      else { se.textContent = s.mode === 'live' ? '🟢 LIVE' : '🟢 PAPER'; se.className = 'pill bg-emerald-900 text-emerald-300'; }
 
-      document.getElementById('advice').textContent = s.advice || '';
-      document.getElementById('at-risk').textContent = s.at_risk_usd != null ? '$' + Number(s.at_risk_usd).toFixed(2) : '--';
-      document.getElementById('news-tone').textContent = s.news_tone || '--';
-      document.getElementById('regime-text').textContent = s.regime || '--';
+      const vb = s.wallet_balances || {};
+      document.getElementById('wallet-kalshi-balance').textContent = money(vb.kalshi);
+      document.getElementById('wallet-poly-balance').textContent = money(vb.polymarket);
+      const vs = s.venue_stats || {};
+      const k = vs.kalshi || {}, pm = vs.polymarket || {};
+      const kp = document.getElementById('wallet-kalshi-pnl');
+      kp.textContent = signedMoney(k.pnl_usd); kp.className = pnlClass(k.pnl_usd || 0);
+      const pp = document.getElementById('wallet-poly-pnl');
+      pp.textContent = signedMoney(pm.pnl_usd); pp.className = pnlClass(pm.pnl_usd || 0);
+      document.getElementById('wallet-kalshi-trades').textContent = k.trades || 0;
+      document.getElementById('wallet-poly-trades').textContent = pm.trades || 0;
+      document.getElementById('wallet-total-bankroll').textContent = money(s.risk && s.risk.bankroll != null ? s.risk.bankroll : 100);
+      const tp = document.getElementById('wallet-total-pnl');
+      const totalPnl = Number((s.trade_totals || {}).total_pnl_usd || 0);
+      tp.textContent = signedMoney(totalPnl); tp.className = pnlClass(totalPnl);
+      document.getElementById('wallet-total-atrisk').textContent = money(s.at_risk_usd);
 
-      // Live BTC price + feed age.
       document.getElementById('btc-price').textContent = s.btc_price != null ? '$' + Number(s.btc_price).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '--';
       if (s.feed_updated_at) {
         const age = Math.max(0, Math.round((Date.now() / 1000) - s.feed_updated_at));
-        document.getElementById('feed-age').textContent = 'updated ' + age + 's ago';
-      } else {
-        document.getElementById('feed-age').textContent = 'connecting…';
-      }
+        document.getElementById('feed-age').textContent = '🔄 ' + age + 's ago';
+      } else { document.getElementById('feed-age').textContent = 'connecting…'; }
       if (priceChart) {
         const hist = s.price_history || [];
         priceChart.data.labels = hist.map((_, i) => i);
@@ -208,81 +249,44 @@
         priceChart.update();
       }
 
-      // Polymarket meters (5m/10m/15m Up probability).
       const poly = s.polymarket_markets || {};
-      const polyEl = document.getElementById('poly-markets');
-      const tfOrder = ['5m', '15m'];
-      polyEl.innerHTML = tfOrder.map(tf => {
+      document.getElementById('poly-markets').innerHTML = ['5m', '15m'].map(tf => {
         const m = poly[tf];
-        if (!m) return `<div><div class="text-xs text-gray-400 mb-1">${tf}</div>${pctBar(null, '')}</div>`;
-        const up = (m.up ?? m.prob_up ?? 0) * 100;
-        const down = (m.down ?? 0) * 100;
-        return `<div><div class="flex justify-between text-xs text-gray-400 mb-1"><span>${tf}</span><span class="text-green-400">▲ ${up.toFixed(0)}%</span></div>${pctBar(m.prob_up ?? m.up, 'bg-green-500')}<div class="flex justify-between text-xs text-gray-500 mt-1"><span>Down</span><span class="text-red-400">▼ ${down.toFixed(0)}%</span></div></div>`;
-      }).join('') || '<div class="text-gray-500">No Polymarket data yet</div>';
+        if (!m) return '<div><div class="text-xs text-gray-400 mb-1">' + tf + ' window</div>' + pctBar(null, '') + '</div>';
+        const up = (m.prob_up ?? m.up ?? 0) * 100;
+        return '<div><div class="flex justify-between text-xs text-gray-400 mb-1"><span>' + tf + ' Up</span><span class="text-green-400">▲ ' + up.toFixed(0) + '%</span></div>' + pctBar(m.prob_up ?? m.up, 'bg-green-500') + '<div class="text-xs text-gray-500 mt-1">Down ' + (100 - up).toFixed(0) + '%</div></div>';
+      }).join('') || '<div class="text-gray-500">No Polymarket data</div>';
 
-      // Kalshi meter.
       const kal = s.kalshi_market || {};
-      const kalEl = document.getElementById('kalshi-meter');
       const yes = kal.prob_up != null ? kal.prob_up * 100 : null;
-      kalEl.innerHTML = `<div class="flex justify-between text-xs text-gray-400 mb-1"><span>Yes</span><span class="text-green-400">${yes != null ? yes.toFixed(0) + '%' : '--'}</span></div>${pctBar(kal.prob_up, 'bg-blue-500')}<div class="text-xs text-gray-500 mt-1">No ${yes != null ? (100 - yes).toFixed(0) : '--'}%</div>`;
+      document.getElementById('kalshi-meter').innerHTML = '<div class="flex justify-between text-xs text-gray-400 mb-1"><span>Yes</span><span class="text-green-400">' + (yes != null ? yes.toFixed(0) + '%' : '--') + '</span></div>' + pctBar(kal.prob_up, 'bg-blue-500') + '<div class="text-xs text-gray-500 mt-1">No ' + (yes != null ? (100 - yes).toFixed(0) : '--') + '%</div>';
 
-      const sig = document.getElementById('signals');
-      sig.innerHTML = (s.signals && s.signals.length)
-        ? s.signals.slice(0, 6).map(x => `<li>${x}</li>`).join('')
-        : '<li class="text-gray-500">No active signal</li>';
+      const cd = s.window_countdowns || {};
+      document.getElementById('countdowns').innerHTML = Object.keys(cd).map(k => '<div class="flex justify-between"><span class="text-gray-400">' + k + '</span><b>' + fmtCountdown(cd[k]) + '</b></div>').join('') || '<div class="text-gray-500">--</div>';
 
-      const cd = document.getElementById('countdowns');
-      const winTotal = { '5m': 300, '15m': 900 };
-      cd.innerHTML = Object.entries(s.window_countdowns || {}).map(([k, v]) => {
-        const total = winTotal[k] || 300;
-        const remain = Math.max(0, Number(v));
-        const pct = Math.min(100, (remain / total) * 100);
-        return `<div class="mb-2"><div class="flex justify-between text-xs text-gray-400 mb-1"><span>${k}</span><span class="text-yellow-400 font-mono">${remain.toFixed(0)}s</span></div><div class="w-full bg-gray-800 rounded-full h-2"><div class="h-2 rounded-full bg-yellow-500" style="width:${pct}%"></div></div></div>`;
-      }).join('') || '<div class="text-gray-500">--</div>';
+      document.getElementById('brti').textContent = s.brti_60s != null ? '$' + Number(s.brti_60s).toFixed(2) : '--';
+      document.getElementById('strike').textContent = s.open_strike != null ? '$' + Number(s.open_strike).toFixed(2) : '--';
+      document.getElementById('signals').innerHTML = (s.signals || []).map(x => '<li>' + x + '</li>').join('') || '<li class="text-gray-500">Waiting for a setup…</li>';
 
-      const tbody = document.getElementById('strategy-table');
-      tbody.innerHTML = Object.entries(s.strategy_metrics || {}).map(([name, m]) => {
-        const pnl = m.pnl_usd ?? 0;
-        const cls = pnl > 0 ? 'text-green-400' : (pnl < 0 ? 'text-red-400' : 'text-gray-300');
-        return `<tr class="border-b border-gray-800"><td class="py-1">${name}</td><td class="text-right">${(m.net_ev ?? 0).toFixed(4)}</td><td class="text-right">${((m.win_rate ?? 0) * 100).toFixed(1)}%</td><td class="text-right">$${(m.notional_usd ?? 0).toFixed(2)}</td><td class="text-right ${cls}">$${pnl.toFixed(2)}</td></tr>`;
+
+      document.getElementById('strategy-table').innerHTML = Object.entries(s.strategy_metrics || {}).map(([nm, m]) => {
+        const p = m.pnl_usd ?? 0;
+        return '<tr class="border-b border-gray-800"><td class="py-1">' + nm + '</td><td class="text-right">' + (m.net_ev ?? 0).toFixed(4) + '</td><td class="text-right">' + ((m.win_rate ?? 0) * 100).toFixed(0) + '%</td><td class="text-right">$' + (m.notional_usd ?? 0).toFixed(2) + '</td><td class="text-right ' + pnlClass(p) + '">' + signedMoney(p) + '</td></tr>';
       }).join('') || '<tr><td colspan="5" class="text-gray-500">--</td></tr>';
 
-      // Trade totals.
-      const totals = s.trade_totals || {};
-      document.getElementById('total-trades').textContent = totals.total_trades ?? 0;
-      document.getElementById('total-notional').textContent = '$' + Number(totals.total_notional_usd ?? 0).toFixed(2);
-      const totalPnl = Number(totals.total_pnl_usd ?? 0);
-      const pnlEl = document.getElementById('total-pnl');
-      pnlEl.textContent = (totalPnl >= 0 ? '$' : '-$') + Math.abs(totalPnl).toFixed(2);
-      pnlEl.className = totalPnl > 0 ? 'text-green-400' : (totalPnl < 0 ? 'text-red-400' : 'text-gray-300');
-      document.getElementById('total-fees').textContent = '$' + Number(totals.total_fees_usd ?? 0).toFixed(2);
+      const tt = s.trade_totals || {};
+      document.getElementById('total-trades').textContent = tt.total_trades ?? 0;
+      document.getElementById('total-notional').textContent = money(tt.total_notional_usd);
+      const tpn = document.getElementById('total-pnl');
+      tpn.textContent = signedMoney(tt.total_pnl_usd); tpn.className = pnlClass(tt.total_pnl_usd || 0);
+      document.getElementById('total-fees').textContent = money(tt.total_fees_usd);
 
-      // Recent trades.
-      const rt = document.getElementById('recent-trades');
-      const trades = s.recent_trades || [];
-      rt.innerHTML = trades.slice().reverse().slice(0, 25).map(t => {
+      document.getElementById('recent-trades').innerHTML = (s.recent_trades || []).slice().reverse().slice(0, 25).map(t => {
         const p = t.pnl ?? 0;
-        const cls = p > 0 ? 'text-green-400' : (p < 0 ? 'text-red-400' : 'text-gray-300');
         const when = t.ts ? new Date(t.ts * 1000).toLocaleTimeString() : '--';
-        return `<tr class="border-b border-gray-800">
-          <td class="py-1 text-gray-500">${when}</td>
-          <td>${t.strategy ?? ''}</td>
-          <td>${t.action ?? ''} ${t.side ?? ''}</td>
-          <td class="text-right">${(t.price ?? 0).toFixed(3)}</td>
-          <td class="text-right">$${(t.notional ?? 0).toFixed(2)}</td>
-          <td class="text-right ${cls}">${p >= 0 ? '$' : '-$'}${Math.abs(p).toFixed(2)}</td>
-        </tr>`;
-      }).join('') || '<tr><td colspan="6" class="text-gray-500 py-2">No trades settled yet — waiting for a window to close.</td></tr>';
-
-      // Engine status badge.
-      const statusEl = document.getElementById('engine-status');
-      if (s.kill_switch) {
-        statusEl.textContent = 'HALTED';
-        statusEl.className = 'px-3 py-1 rounded-full text-xs font-semibold bg-red-900 text-red-300';
-      } else {
-        statusEl.textContent = s.mode === 'live' ? 'RUNNING (live)' : 'RUNNING (paper)';
-        statusEl.className = 'px-3 py-1 rounded-full text-xs font-semibold bg-emerald-900 text-emerald-300';
-      }
+        const ven = (t.venue || '') + (t.tf ? ' ' + (t.tf / 60) + 'm' : '');
+        return '<tr class="border-b border-gray-800"><td class="py-1 text-gray-500">' + when + '</td><td class="text-gray-400">' + ven + '</td><td>' + (t.strategy || '') + '</td><td>' + (t.action || '') + ' ' + (t.side || '') + '</td><td class="text-right">' + (t.price ?? 0).toFixed(3) + '</td><td class="text-right">$' + (t.notional ?? 0).toFixed(2) + '</td><td class="text-right ' + pnlClass(p) + '">' + signedMoney(p) + '</td></tr>';
+      }).join('') || '<tr><td colspan="7" class="text-gray-500 py-2">No trades settled yet — waiting for a window to close.</td></tr>';
 
       if (chart) {
         const eq = s.equity_curve || [];
@@ -290,12 +294,9 @@
         chart.data.datasets[0].data = eq.map(e => e[1]);
         chart.update();
       }
-
-      const halted = s.kill_switch;
-      document.getElementById('halt-btn').className = halted
+      document.getElementById('halt-btn').className = s.kill_switch
         ? 'px-10 py-4 rounded-xl bg-red-900 text-white text-xl font-bold ring-2 ring-red-500'
         : 'px-10 py-4 rounded-xl bg-red-700 hover:bg-red-600 text-white text-xl font-bold shadow-lg shadow-red-900/50';
-      document.getElementById('resume-btn').className = 'px-10 py-4 rounded-xl bg-green-700 hover:bg-green-600 text-white text-xl font-bold';
     }
 
     async function poll() {
@@ -313,14 +314,14 @@
       ensureKey();
       const r = await fetch('/api/halt', { method: 'POST', headers: apiHeaders() });
       const d = await r.json().catch(() => ({}));
-      toast(d.message || 'Kill switch engaged');
+      toast(d.message || '🛑 Kill switch engaged');
       poll();
     });
     document.getElementById('resume-btn').addEventListener('click', async () => {
       ensureKey();
       const r = await fetch('/api/start', { method: 'POST', headers: apiHeaders() });
       const d = await r.json().catch(() => ({}));
-      toast(d.message || 'Engine resumed');
+      toast(d.message || '▶ Engine resumed');
       poll();
     });
     document.getElementById('ask-ai').addEventListener('click', async () => {
@@ -331,9 +332,7 @@
         const r = await fetch('/api/assistant', { method: 'POST', headers: apiHeaders() });
         const d = await r.json();
         out.textContent = d.text;
-      } catch (e) {
-        out.textContent = 'The AI assistant is unavailable right now.';
-      }
+      } catch (e) { out.textContent = 'The AI assistant is unavailable right now.'; }
     });
 
     ensureKey();
@@ -344,3 +343,4 @@
   </script>
 </body>
 </html>
+

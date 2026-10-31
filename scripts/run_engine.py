@@ -52,6 +52,27 @@ async def _news_loop(settings, intelligence: NewsIntelligence) -> None:
         await asyncio.sleep(refresh)
 
 
+async def _balance_loop(settings, engine_state) -> None:
+    """Periodically refresh the Kalshi portfolio balance (only when keys are set)."""
+    from btc_edge.connectors.kalshi_client import KalshiClient, build_kalshi_signer_from_env
+
+    log = logging.getLogger("balance_loop")
+    signer = build_kalshi_signer_from_env()
+    if signer is None:
+        log.info("No Kalshi API keys — wallet balance unavailable")
+        return
+    client = KalshiClient(signer=signer, base_url=settings.kalshi.active_base_url)
+    while True:
+        try:
+            data = await client.get_balance()
+            pv = data.get("portfolio_value") or data.get("balance")
+            if pv is not None:
+                engine_state.wallet_balances["kalshi"] = float(pv) / 100.0  # cents -> dollars
+        except Exception as exc:  # noqa: BLE001 - the loop must never die
+            log.warning("Kalshi balance error: %s", exc)
+        await asyncio.sleep(60)
+
+
 def main() -> int:
     settings = load_settings()
     _setup_logging(settings.logging.level)
@@ -103,6 +124,9 @@ def main() -> int:
     # Start the trading loop: strategies → router → paper settlement.
     trader = TradingLoop(engine_state, settings, feed)
     loop.create_task(trader.run())
+
+    # Refresh the Kalshi wallet balance periodically (only if API keys are set).
+    loop.create_task(_balance_loop(settings, engine_state))
 
     print(f"BTC-Edge engine starting in mode={settings.trading.mode!r}")
     print(f"Live trading allowed: {settings.live_trading_allowed()}")
