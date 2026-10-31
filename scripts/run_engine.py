@@ -17,6 +17,7 @@ from btc_edge.config import load_settings
 from btc_edge.connectors.news_scraper import NewsScraper
 from btc_edge.db.session import Database
 from btc_edge.execution.killswitch import KillSwitch
+from btc_edge.execution.trading_loop import TradingLoop
 from btc_edge.features.sentiment_analyzer import SentimentAnalyzer
 from btc_edge.ml.self_healing_filter import NewsIntelligence, SelfHealingFilter
 from btc_edge.web.app import app, engine_state
@@ -45,13 +46,6 @@ async def _news_loop(settings, intelligence: NewsIntelligence) -> None:
             engine_state.news_headlines = [
                 {"source": i.source, "title": i.title} for i in items[:8]
             ]
-            # Derive simple human-readable signals from the aggregate.
-            if aggregate > 0.25:
-                engine_state.signals = ["News is bullish — bot leans toward adding."]
-            elif aggregate < -0.25:
-                engine_state.signals = ["News is bearish — bot leans toward caution."]
-            else:
-                engine_state.signals = ["News is neutral — waiting for a setup."]
             log.info("News loop: %d items, sentiment %+.3f", len(items), aggregate)
         except Exception as exc:  # noqa: BLE001 - the loop must never die
             log.warning("News loop error: %s", exc)
@@ -105,6 +99,10 @@ def main() -> int:
         kalshi_ticker=settings.kalshi.market_ticker,
     )
     loop.create_task(feed.run())
+
+    # Start the trading loop: strategies → router → paper settlement.
+    trader = TradingLoop(engine_state, settings, feed)
+    loop.create_task(trader.run())
 
     print(f"BTC-Edge engine starting in mode={settings.trading.mode!r}")
     print(f"Live trading allowed: {settings.live_trading_allowed()}")
