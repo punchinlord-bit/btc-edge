@@ -222,11 +222,8 @@ class Settings(BaseSettings):
         return v
 
     def live_trading_allowed(self) -> bool:
-        """Dual safety check: mode == 'live' AND env flag == 'TRUE'."""
-        return (
-            self.trading.mode == "live"
-            and os.getenv("ALLOW_LIVE_TRADING") == "TRUE"
-        )
+        """Dual safety check: mode == 'live' AND allow_live_trading == True."""
+        return self.trading.mode == "live" and self.allow_live_trading
 
     @property
     def db_path(self) -> Path:

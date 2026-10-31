@@ -29,6 +29,14 @@ def _strip_query(path: str) -> str:
     return path.split("?", 1)[0]
 
 
+def _client_order_id(ticker: str, side: str, action: str, count: int, price: float) -> str:
+    """Unique client order id for idempotency (timestamp-based, 32 hex chars)."""
+    import hashlib
+
+    raw = f"{ticker}|{side}|{action}|{count}|{price}|{time.time()}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
+
+
 def _load_private_key(pem_or_b64: str):
     """Load an Ed25519 or RSA private key from PEM or raw base64.
 
@@ -249,18 +257,17 @@ class KalshiClient:
         post_only: bool = False,
     ) -> dict[str, Any]:
         body = {
-            "ticker": ticker,
+            "market_ticker": ticker,
             "side": side,
             "action": action,
             "count": count,
             "type": order_type,
-            "buy_max_cost": None,
-            "sell_position_floor": None,
+            "client_order_id": _client_order_id(ticker, side, action, count, price),
         }
         if order_type == "limit":
             body["yes_price"] = int(round(price * 100))  # cents
             body["post_only"] = post_only
-        return await self._request("POST", "/portfolio/orders", json_body=body)
+        return await self._request("POST", "/portfolio/events/orders", json_body=body)
 
     async def cancel_order(self, order_id: str) -> dict[str, Any]:
         return await self._request("DELETE", f"/portfolio/orders/{order_id}")
@@ -386,11 +393,22 @@ class KalshiWSClient:
 
 
 def build_kalshi_signer_from_env() -> KalshiSigner | None:
-    """Build a signer from ``KALSHI_ACCESS_KEY_ID`` / ``KALSHI_PRIVATE_KEY`` env."""
+    """Build a signer from ``KALSHI_ACCESS_KEY_ID`` / ``KALSHI_PRIVATE_KEY`` env.
+
+    Reads the OS environment first, then falls back to the ``Settings`` object
+    (which loads ``.env`` via pydantic-settings, since ``os.getenv`` does not
+    see ``.env``).
+    """
     import os
 
     key_id = os.getenv("KALSHI_ACCESS_KEY_ID") or os.getenv("KALSHI_API_KEY_ID")
     private = os.getenv("KALSHI_PRIVATE_KEY")
+    if not key_id or not private:
+        from btc_edge.config import get_settings
+
+        s = get_settings()
+        key_id = key_id or s.kalshi_access_key_id or s.kalshi_api_key_id
+        private = private or s.kalshi_private_key
     if not key_id or not private:
         return None
     return KalshiSigner(key_id, private)

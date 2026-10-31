@@ -57,8 +57,8 @@ async def test_polymarket(settings) -> bool:
 
     from btc_edge.connectors.poly_client import GammaClient, PolymarketClient, compute_window_ts, slug_for
 
-    wallet = os.getenv("POLYMARKET_WALLET")
-    key = os.getenv("POLYMARKET_PRIVATE_KEY")
+    wallet = os.getenv("POLYMARKET_WALLET") or settings.polymarket_wallet
+    key = os.getenv("POLYMARKET_PRIVATE_KEY") or settings.polymarket_private_key
     if not wallet or not key:
         print("Polymarket: no wallet/private key set — skipping "
               "(set POLYMARKET_WALLET + POLYMARKET_PRIVATE_KEY)")

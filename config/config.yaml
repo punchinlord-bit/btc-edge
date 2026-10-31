@@ -19,7 +19,7 @@ kalshi:
   ws_url: "wss://external-feeds.kalshi.com/trade-api/v2/external-feeds"
   rate_limit_balance_per_sec: 1.0
   market_ticker: "KXBTC15M"
-  use_demo: false
+  use_demo: true
 
 connectors:
   coinbase:

@@ -133,8 +133,8 @@ def main() -> int:
         kalshi_client = KalshiClient(signer=signer, base_url=settings.kalshi.active_base_url)
 
     poly_client: Any | None = None
-    pm_wallet = os.getenv("POLYMARKET_WALLET")
-    pm_key = os.getenv("POLYMARKET_PRIVATE_KEY")
+    pm_wallet = os.getenv("POLYMARKET_WALLET") or settings.polymarket_wallet
+    pm_key = os.getenv("POLYMARKET_PRIVATE_KEY") or settings.polymarket_private_key
     if pm_wallet and pm_key:
         poly_client = PolymarketClient(
             gamma=GammaClient(settings.polymarket.gamma_api_url),
