@@ -336,17 +336,12 @@ class TradingLoop:
 
     def _update_state(self, ctx: MarketContext, decisions: list[Any]) -> None:
         self.state.regime = ctx.regime
+        # Per-strategy metrics + equity curve are the bot's *internal* accounting of
+        # the real orders it placed. Venue totals / trade history / P&L come from
+        # the REAL portfolio poller (portfolio_poller.py), not local settlement.
         self.state.strategy_metrics = self._metrics
         self.state.equity_curve = self._equity_curve[-200:]
         self.state.risk["at_risk_usd"] = sum(p["price"] * p["size"] for p in self._open)
-        self.state.recent_trades = self._recent_trades[-50:]
-        self.state.venue_stats = self._venue_stats
-        self.state.trade_totals = {
-            "total_trades": sum(m["trades"] for m in self._metrics.values()),
-            "total_notional_usd": sum(m["notional_usd"] for m in self._metrics.values()),
-            "total_pnl_usd": self._total_pnl,
-            "total_fees_usd": sum(m["fees_usd"] for m in self._metrics.values()),
-        }
         if decisions:
             self.state.signals = [
                 f"{d.strategy}: {d.action} {d.side} @ {d.price:.3f} (EV {d.ev_estimate:+.3f})"

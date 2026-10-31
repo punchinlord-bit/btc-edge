@@ -127,7 +127,12 @@
   </section>
 
   <section class="card mb-6">
-    <div class="widget-title"><span>🧾</span> Trade Activity</div>
+    <div class="widget-title"><span>📦</span> Open Positions <span class="normal-case text-gray-500 font-normal">(live exchange data)</span></div>
+    <div id="open-positions" class="text-sm text-gray-400">--</div>
+  </section>
+
+  <section class="card mb-6">
+    <div class="widget-title"><span>🧾</span> Trade Activity <span class="normal-case text-gray-500 font-normal">(real fills)</span></div>
     <div class="flex flex-wrap gap-2 text-sm mb-3">
       <span class="pill bg-gray-800">Trades: <b id="total-trades">0</b></span>
       <span class="pill bg-gray-800">Notional: <b id="total-notional">$0.00</b></span>
@@ -272,7 +277,10 @@
       const tp = document.getElementById('wallet-total-pnl');
       const totalPnl = Number((s.trade_totals || {}).total_pnl_usd || 0);
       tp.textContent = signedMoney(totalPnl); tp.className = pnlClass(totalPnl);
-      document.getElementById('wallet-total-atrisk').textContent = money(s.at_risk_usd);
+      const atRisk = (s.risk && s.risk.at_risk_usd) != null
+        ? s.risk.at_risk_usd
+        : (s.open_positions || []).reduce((sum, p) => sum + (Number(p.current_value) || Number(p.yes) || 0), 0);
+      document.getElementById('wallet-total-atrisk').textContent = money(atRisk);
 
       const btcEl = document.getElementById('btc-price');
       const newBtc = s.btc_price;
@@ -359,6 +367,16 @@
       const tpn = document.getElementById('total-pnl');
       tpn.textContent = signedMoney(tt.total_pnl_usd); tpn.className = pnlClass(tt.total_pnl_usd || 0);
       document.getElementById('total-fees').textContent = money(tt.total_fees_usd);
+
+      const positions = s.open_positions || [];
+      document.getElementById('open-positions').innerHTML = positions.length ? positions.map(p => {
+        const ven = p.venue || '';
+        const title = p.title || p.ticker || '';
+        const size = p.size ?? p.yes ?? 0;
+        const pnl = p.floating_pnl ?? p.unrealized_pnl ?? 0;
+        const val = p.current_value ?? ((p.avg_price != null && size) ? p.avg_price * size : 0);
+        return '<div class="flex justify-between py-1 border-b border-gray-800"><span>' + ven + ' · ' + title + (p.outcome ? ' <span class="text-gray-500">' + p.outcome + '</span>' : '') + '</span><span class="text-right">' + (size != null ? Number(size).toFixed(2) + ' ct · ' : '') + money(val) + ' <span class="' + pnlClass(pnl) + '">' + signedMoney(pnl) + '</span></span></div>';
+      }).join('') : '<div class="text-gray-500">No open positions.</div>';
 
       document.getElementById('recent-trades').innerHTML = (s.recent_trades || []).slice().reverse().slice(0, 25).map(t => {
         const p = t.pnl ?? 0;

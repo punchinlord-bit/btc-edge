@@ -320,6 +320,10 @@ class KalshiClient:
             params["ticker"] = ticker
         return await self._request("GET", "/portfolio/settlements", params=params)
 
+    async def get_positions(self, limit: int = 100) -> dict[str, Any]:
+        """Fetch open positions (unsettled contracts currently held)."""
+        return await self._request("GET", "/portfolio/positions", params={"limit": limit})
+
 
 def parse_orderbook(payload: dict[str, Any], ticker: str) -> KalshiOrderBook:
     """Parse a Kalshi orderbook payload into a normalized structure.

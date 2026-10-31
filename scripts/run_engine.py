@@ -59,29 +59,53 @@ async def _news_loop(settings, intelligence: NewsIntelligence) -> None:
         await asyncio.sleep(refresh)
 
 
-async def _balance_loop(settings, engine_state) -> None:
-    """Periodically refresh the Kalshi portfolio balance (only when keys are set)."""
-    from btc_edge.connectors.kalshi_client import KalshiClient, build_kalshi_signer_from_env
+async def _portfolio_loop(settings, engine_state, kalshi_client, poly_client, pm_wallet) -> None:
+    """Periodically refresh REAL portfolio data (balances, fills, settlements,
+    positions) from Kalshi + Polymarket and publish it to the dashboard."""
+    from btc_edge.execution.portfolio_poller import poll_kalshi, poll_polymarket
 
-    log = logging.getLogger("balance_loop")
-    signer = build_kalshi_signer_from_env()
-    if signer is None:
-        log.info("No Kalshi API keys — wallet balance unavailable")
-        return
-    client = KalshiClient(signer=signer, base_url=settings.kalshi.active_base_url)
+    log = logging.getLogger("portfolio_loop")
+    ticker = settings.kalshi.market_ticker
+    interval = max(15, int(getattr(settings, "portfolio_poll_seconds", 30) or 30))
     while True:
-        try:
-            data = await client.get_balance()
-            dollars = data.get("balance_dollars")
-            if dollars is not None:
-                engine_state.wallet_balances["kalshi"] = float(dollars)
-            else:
-                pv = data.get("portfolio_value") or data.get("balance")
-                if pv is not None:
-                    engine_state.wallet_balances["kalshi"] = float(pv) / 100.0  # cents -> dollars
-        except Exception as exc:  # noqa: BLE001 - the loop must never die
-            log.warning("Kalshi balance error: %s", exc)
-        await asyncio.sleep(60)
+        recent: list = []
+        open_pos: list = []
+        totals = {
+            "total_trades": 0.0,
+            "total_notional_usd": 0.0,
+            "total_pnl_usd": 0.0,
+            "total_fees_usd": 0.0,
+        }
+        if kalshi_client is not None:
+            try:
+                k = await poll_kalshi(kalshi_client, ticker=ticker)
+                engine_state.wallet_balances["kalshi"] = k.balance
+                engine_state.venue_stats["kalshi"] = k.venue_stats
+                recent.extend(k.recent_trades)
+                open_pos.extend(k.open_positions)
+                for key in totals:
+                    totals[key] += k.trade_totals.get(key, 0.0)
+            except Exception as exc:  # noqa: BLE001 - the loop must never die
+                log.warning("Kalshi portfolio poll error: %s", exc)
+        if poly_client is not None:
+            try:
+                p = await poll_polymarket(poly_client, wallet=pm_wallet)
+                engine_state.wallet_balances["polymarket"] = p.balance
+                engine_state.venue_stats["polymarket"] = p.venue_stats
+                recent.extend(p.recent_trades)
+                open_pos.extend(p.open_positions)
+                for key in totals:
+                    totals[key] += p.trade_totals.get(key, 0.0)
+            except Exception as exc:  # noqa: BLE001 - the loop must never die
+                log.warning("Polymarket portfolio poll error: %s", exc)
+
+        if recent:
+            recent.sort(key=lambda t: float(t.get("ts") or 0.0))
+            engine_state.recent_trades = recent[-100:]
+        if open_pos:
+            engine_state.open_positions = open_pos[-50:]
+        engine_state.trade_totals = totals
+        await asyncio.sleep(interval)
 
 
 def main() -> int:
@@ -158,8 +182,8 @@ def main() -> int:
     )
     loop.create_task(trader.run())
 
-    # Refresh the Kalshi wallet balance periodically (only if API keys are set).
-    loop.create_task(_balance_loop(settings, engine_state))
+    # Refresh REAL portfolio data (balances, fills, settlements, positions).
+    loop.create_task(_portfolio_loop(settings, engine_state, kalshi_client, poly_client, pm_wallet))
 
     print(f"BTC-Edge engine starting in mode={settings.trading.mode!r}")
     print(f"Live trading allowed: {settings.live_trading_allowed()}")

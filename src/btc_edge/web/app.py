@@ -67,6 +67,7 @@ class EngineState:
         self.trade_totals: dict[str, float] = {}
         self.venue_stats: dict[str, dict[str, Any]] = {}
         self.wallet_balances: dict[str, float | None] = {"kalshi": None, "polymarket": None}
+        self.open_positions: list[dict[str, Any]] = []
         self.updated_at: float = time.time()
 
     def snapshot(self) -> dict[str, Any]:
@@ -92,6 +93,7 @@ class EngineState:
             "trade_totals": self.trade_totals,
             "venue_stats": self.venue_stats,
             "wallet_balances": self.wallet_balances,
+            "open_positions": self.open_positions,
             "feed_updated_at": self.feed_updated_at,
             "updated_at": self.updated_at,
         }
@@ -152,6 +154,7 @@ def metrics() -> JSONResponse:
         "trade_totals": engine_state.trade_totals,
         "venue_stats": engine_state.venue_stats,
         "wallet_balances": engine_state.wallet_balances,
+        "open_positions": engine_state.open_positions,
         "risk": engine_state.risk,
         "feed_updated_at": engine_state.feed_updated_at,
     })
