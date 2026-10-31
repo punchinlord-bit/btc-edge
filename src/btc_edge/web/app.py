@@ -387,7 +387,10 @@ def rocket() -> HTMLResponse:
     path = TEMPLATE_DIR / "rocketChart.html"
     if not path.exists():
         return HTMLResponse("<html><body><h1>Rocket Chart</h1><p>Template missing.</p></body></html>")
-    return HTMLResponse(path.read_text(encoding="utf-8"))
+    return HTMLResponse(
+        path.read_text(encoding="utf-8"),
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache", "Expires": "0"},
+    )
 
 
 @app.post("/api/assistant", dependencies=[Depends(require_auth)])
@@ -423,7 +426,10 @@ def index() -> HTMLResponse:
     path = TEMPLATE_DIR / "index.html"
     if not path.exists():
         return HTMLResponse("<html><body><h1>BTC-Edge</h1><p>Dashboard template missing.</p></body></html>")
-    return HTMLResponse(path.read_text(encoding="utf-8"))
+    return HTMLResponse(
+        path.read_text(encoding="utf-8"),
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache", "Expires": "0"},
+    )
 
 
 @app.get("/favicon.ico", include_in_schema=False)
