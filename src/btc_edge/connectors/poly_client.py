@@ -19,6 +19,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass, field
+from datetime import UTC
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -253,4 +254,139 @@ class PolymarketCLOBWS:
 
     async def stop(self) -> None:
         self._running = False
+
+
+def btc_updown_15m_slug(now_ts: float | None = None) -> str:
+    """Current Polymarket US ``BTC Up or Down 15m`` market slug.
+
+    Polymarket US (polymarket.us) lists short-horizon BTC up/down markets with
+    slugs of the form ``cpc-btc-updown-15m-{YYYY-MM-DD-HHMM}z`` where the
+    timestamp is the UTC window open floored to the 15-minute boundary.
+    """
+    from datetime import datetime
+
+    now = datetime.now(UTC) if now_ts is None else datetime.fromtimestamp(now_ts, UTC)
+    window = now.replace(minute=(now.minute // 15) * 15, second=0, microsecond=0)
+    return f"cpc-btc-updown-15m-{window.strftime('%Y-%m-%d-%H%M')}z"
+
+
+def _order_intent(side: str, action: str) -> str:
+    """Map a (side, action) decision to a Polymarket US order intent."""
+    if side == "up" and action == "buy":
+        return "ORDER_INTENT_BUY_LONG"
+    if side == "up" and action == "sell":
+        return "ORDER_INTENT_SELL_LONG"
+    if side == "down" and action == "buy":
+        return "ORDER_INTENT_BUY_SHORT"
+    if side == "down" and action == "sell":
+        return "ORDER_INTENT_SELL_SHORT"
+    raise ValueError(f"unsupported side/action: {side}/{action}")
+
+
+class PolymarketUSClient:
+    """Polymarket US connector.
+
+    Wraps the *synchronous* ``polymarket-us`` SDK behind async methods so it
+    drops into the existing asyncio engine. Auth is a Key ID + Secret Key issued
+    from ``polymarket.us/developer`` (NOT the EVM private key used on
+    polymarket.com). Trades the ``BTC Up or Down 15m`` market.
+    """
+
+    def __init__(self, key_id: str | None = None, secret_key: str | None = None) -> None:
+        self.key_id = key_id
+        self.secret_key = secret_key
+        self._client: Any = None
+
+    @property
+    def client(self) -> Any:
+        if self._client is None:
+            from polymarket_us import PolymarketUS
+
+            self._client = PolymarketUS(key_id=self.key_id, secret_key=self.secret_key)
+        return self._client
+
+    @property
+    def available(self) -> bool:
+        return bool(self.key_id and self.secret_key)
+
+    @staticmethod
+    def _px(value: Any) -> float | None:
+        try:
+            v = float((value or {}).get("value"))
+        except (AttributeError, TypeError, ValueError):
+            return None
+        return v
+
+    def resolve_15m(self, now_ts: float | None = None) -> dict[str, Any]:
+        """Resolve the current 15m market: slug + best bid/ask/mid (best-effort)."""
+        slug = btc_updown_15m_slug(now_ts)
+        out: dict[str, Any] = {"slug": slug, "bid": None, "ask": None, "mid": None}
+        try:
+            bbo = self.client.markets.bbo(slug)
+            data = bbo.get("marketData") or {}
+            out["bid"] = self._px(data.get("bestBid"))
+            out["ask"] = self._px(data.get("bestAsk"))
+            out["mid"] = self._px(data.get("currentPx"))
+        except Exception as exc:  # noqa: BLE001 - market reads are best-effort
+            logger.debug("Polymarket US bbo unavailable: %s", exc)
+        return out
+
+    async def get_bbo(self, now_ts: float | None = None) -> dict[str, Any]:
+        return await asyncio.to_thread(self.resolve_15m, now_ts)
+
+    def _place_order_sync(
+        self, slug: str, side: str, action: str, price: float, size: float, is_maker: bool
+    ) -> Any:
+        intent = _order_intent(side, action)
+        # ``price`` is the decision's YES ("up") price in [0,1]; short (down)
+        # orders trade the NO leg at 1 - yes_price.
+        px = price if side == "up" else (1.0 - price)
+        px = max(0.01, min(0.99, round(px, 2)))
+        quantity = max(1, int(round(size)))
+        tif = "TIME_IN_FORCE_GOOD_TILL_CANCEL" if is_maker else "TIME_IN_FORCE_IMMEDIATE_OR_CANCEL"
+        params = {
+            "marketSlug": slug,
+            "intent": intent,
+            "type": "ORDER_TYPE_LIMIT",
+            "price": {"value": f"{px:.2f}", "currency": "USD"},
+            "quantity": quantity,
+            "tif": tif,
+        }
+        return self.client.orders.create(params)
+
+    async def place_order(
+        self, slug: str, side: str, action: str, price: float, size: float, is_maker: bool = False
+    ) -> Any:
+        return await asyncio.to_thread(self._place_order_sync, slug, side, action, price, size, is_maker)
+
+    def _balance_sync(self) -> float:
+        bal = self.client.account.balances()
+        for b in bal.get("balances") or []:
+            if b.get("currency") == "USD":
+                return float(b.get("currentBalance") or 0.0)
+        return 0.0
+
+    async def get_balance(self) -> float:
+        return await asyncio.to_thread(self._balance_sync)
+
+    def _positions_sync(self) -> list[dict[str, Any]]:
+        resp = self.client.portfolio.positions()
+        if not isinstance(resp, dict):
+            return []
+        positions = resp.get("positions") or {}
+        if isinstance(positions, dict):
+            return list(positions.values())
+        return list(positions)
+
+    async def get_positions(self) -> list[dict[str, Any]]:
+        return await asyncio.to_thread(self._positions_sync)
+
+    def _activities_sync(self) -> list[dict[str, Any]]:
+        resp = self.client.portfolio.activities()
+        if not isinstance(resp, dict):
+            return []
+        return list(resp.get("activities") or [])
+
+    async def get_activities(self) -> list[dict[str, Any]]:
+        return await asyncio.to_thread(self._activities_sync)
 

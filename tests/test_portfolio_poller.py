@@ -63,58 +63,40 @@ def test_poll_kalshi_normalizes_real_data():
     assert snap.open_positions[0]["floating_pnl"] == 0.10
 
 
-class _FakePage:
-    def __init__(self, items):
-        self.items = tuple(items)
-
-
-class _FakePaginator:
-    def __init__(self, items):
-        self._items = items
-
-    async def first_page(self):
-        return _FakePage(self._items)
-
-
-class _FakePosition:
-    def __init__(self, **kw):
-        for k, v in kw.items():
-            setattr(self, k, v)
-
-
-class _FakeSecure:
-    async def get_balance_allowance(self, asset_type=None):
-        return _FakePosition(balance=100.0)
-
-    def list_positions(self, user=None, status=None, page_size=100):
-        if status == "OPEN":
-            return _FakePaginator([
-                _FakePosition(title="BTC up/down", slug="btc-updown-15m", outcome="Yes",
-                              current_size=5.0, avg_price=0.5, current_value=2.5,
-                              entry_cost_usdc=2.0, unrealized_pnl=0.5),
-            ])
-        return _FakePaginator([
-            _FakePosition(title="BTC up/down", outcome="Yes", realized_pnl=0.80),
-            _FakePosition(title="BTC up/down", outcome="No", realized_pnl=-0.30),
-        ])
-
-    def list_account_trades(self):
-        return _FakePaginator([
-            _FakePosition(side="BUY", price=0.5, size=5.0, outcome="Yes", matched_at=1_700_000_000),
-        ])
-
-
 class _FakePoly:
-    async def secure_client(self):
-        return _FakeSecure()
+    async def get_balance(self):
+        return 100.0
+
+    async def get_positions(self):
+        return [
+            {"marketSlug": "cpc-btc-updown-15m-x", "netPosition": "5",
+             "cost": {"value": "0.5", "currency": "USD"},
+             "realized": {"value": "0.0", "currency": "USD"}},
+        ]
+
+    async def get_activities(self):
+        def _res(net, pnl):
+            return {
+                "type": "ACTIVITY_TYPE_POSITION_RESOLUTION",
+                "positionResolution": {
+                    "beforePosition": {"netPosition": net, "cost": {"value": "0.5", "currency": "USD"}},
+                    "afterPosition": {"realized": {"value": pnl, "currency": "USD"}},
+                    "updateTime": 1_700_000_000,
+                },
+            }
+
+        return [
+            _res("5", "0.80"),
+            _res("-5", "-0.30"),
+            {"type": "ACTIVITY_TYPE_ACCOUNT_DEPOSIT", "accountBalanceChange": {}},
+        ]
 
 
 def test_poll_polymarket_normalizes_real_data():
-    snap = asyncio.run(poll_polymarket(_FakePoly(), wallet="0xabc"))
+    snap = asyncio.run(poll_polymarket(_FakePoly()))
     assert snap.balance == 100.0
     assert snap.venue_stats["pnl_usd"] == 0.80 - 0.30
     assert snap.venue_stats["wins"] == 1 and snap.venue_stats["losses"] == 1
     assert snap.recent_trades[0]["side"] == "up"
-    assert snap.recent_trades[0]["action"] == "buy"
     assert snap.open_positions[0]["size"] == 5.0
     assert snap.open_positions[0]["avg_price"] == 0.5

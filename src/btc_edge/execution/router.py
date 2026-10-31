@@ -170,14 +170,18 @@ class Router:
                 order_type=order_type,
                 post_only=is_maker,
             )
-        elif venue == "polymarket" and self.poly_client is not None and token_id:
-            secure = await self.poly_client.secure_client()
-            await secure.create_limit_order(
-                token_id=token_id,
+        elif venue == "polymarket" and self.poly_client is not None:
+            # Polymarket US places orders by market slug + intent (no token IDs).
+            slug = token_id or (self.poly_client.resolve_15m().get("slug") or "")
+            if not slug:
+                return
+            await self.poly_client.place_order(
+                slug=slug,
+                side=decision.side,
+                action=decision.action,
                 price=price,
                 size=size,
-                side="BUY" if decision.action == "buy" else "SELL",
-                post_only=is_maker,
+                is_maker=is_maker,
             )
 
     def _settle_paper(self, order: RoutedOrder, outcome: float | None) -> None:

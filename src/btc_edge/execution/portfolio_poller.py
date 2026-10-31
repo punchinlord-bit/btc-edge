@@ -158,103 +158,89 @@ async def poll_kalshi(client: Any, ticker: str | None = None, limit: int = 200) 
     return snap
 
 
-async def poll_polymarket(client: Any, wallet: str | None = None, limit: int = 100) -> PortfolioSnapshot:
-    """Fetch and normalize the Polymarket account (balance, positions, trades)."""
-    snap = PortfolioSnapshot()
-    # The connector wrapper exposes the authenticated AsyncSecureClient lazily.
-    try:
-        secure = await client.secure_client()
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Polymarket secure client unavailable: %s", exc)
-        return snap
+def _amount_value(value: Any) -> float:
+    """Extract a numeric USD amount from a Polymarket US ``Amount`` dict."""
+    if isinstance(value, dict):
+        return _dollars(value.get("value"))
+    return _dollars(value)
 
+
+async def poll_polymarket(client: Any, limit: int = 100) -> PortfolioSnapshot:
+    """Fetch and normalize the Polymarket US account (balance, positions, activity)."""
+    snap = PortfolioSnapshot()
     try:
-        bal = await secure.get_balance_allowance(asset_type="COLLATERAL")
-        snap.balance = _dollars(getattr(bal, "balance", None))
+        snap.balance = await client.get_balance()
     except Exception as exc:  # noqa: BLE001
         logger.warning("Polymarket balance poll failed: %s", exc)
 
-    open_positions: list[Any] = []
-    closed_positions: list[Any] = []
+    positions: list[dict[str, Any]] = []
     try:
-        open_positions = list(
-            (await secure.list_positions(user=wallet, status="OPEN", page_size=limit).first_page()).items
-        )
+        positions = await client.get_positions()
     except Exception as exc:  # noqa: BLE001
-        logger.warning("Polymarket open positions poll failed: %s", exc)
-    try:
-        closed_positions = list(
-            (await secure.list_positions(user=wallet, status="CLOSED", page_size=limit).first_page()).items
-        )
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Polymarket closed positions poll failed: %s", exc)
+        logger.warning("Polymarket positions poll failed: %s", exc)
 
-    trades: list[Any] = []
+    activities: list[dict[str, Any]] = []
     try:
-        trades = list((await secure.list_account_trades().first_page()).items)
+        activities = await client.get_activities()
     except Exception as exc:  # noqa: BLE001
-        logger.warning("Polymarket trades poll failed: %s", exc)
+        logger.warning("Polymarket activities poll failed: %s", exc)
 
     notional = 0.0
     realized = 0.0
-    wins = 0
-    losses = 0
-    for p in closed_positions:
-        rp = _dollars(getattr(p, "realized_pnl", None))
-        realized += rp
-        wins += 1 if rp > 0 else 0
-        losses += 1 if rp < 0 else 0
-    for p in open_positions:
-        notional += _dollars(getattr(p, "entry_cost_usdc", None))
+    for p in positions[:limit]:
+        size = _dollars(p.get("netPosition"))
+        notional += abs(size)
+        snap.open_positions.append({
+            "venue": "polymarket",
+            "ticker": p.get("marketSlug", ""),
+            "title": p.get("marketSlug", "BTC up/down"),
+            "outcome": "up" if size >= 0 else "down",
+            "size": abs(size),
+            "avg_price": _normalize_price(_amount_value(p.get("cost"))),
+            "current_value": _amount_value(p.get("marketValue")),
+            "realized_pnl": _amount_value(p.get("realized")),
+            "unrealized_pnl": 0.0,
+        })
 
     recent: list[dict[str, Any]] = []
-    for t in trades:
-        price = _normalize_price(getattr(t, "price", None))
-        size = _dollars(getattr(t, "size", None))
-        outcome = getattr(t, "outcome", "") or ""
-        action = (getattr(t, "side", "") or "").lower()
-        side = "up" if outcome.lower() in {"yes", "up", "0"} else "down"
+    for a in activities:
+        typ = a.get("type", "")
+        if typ != "ACTIVITY_TYPE_POSITION_RESOLUTION":
+            continue
+        pr = a.get("positionResolution") or {}
+        before = pr.get("beforePosition") or {}
+        after = pr.get("afterPosition") or {}
+        rp = _amount_value(after.get("realized"))
+        realized += rp
+        net = _dollars(before.get("netPosition"))
         recent.append({
-            "ts": _to_ts(getattr(t, "matched_at", None)),
+            "ts": _to_ts(pr.get("updateTime") or pr.get("createTime") or a.get("createTime")),
             "venue": "polymarket",
-            "tf": 0,
+            "tf": 900,
             "strategy": "",
-            "side": side,
-            "action": action,
-            "price": price,
-            "size": size,
-            "notional": price * size,
+            "side": "up" if net >= 0 else "down",
+            "action": "buy",
+            "price": _normalize_price(_amount_value(before.get("cost"))),
+            "size": abs(net),
+            "notional": abs(net),
             "fee": 0.0,
-            "pnl": 0.0,
+            "pnl": rp,
         })
 
     snap.venue_stats = {
         "notional_usd": notional,
         "pnl_usd": realized,
-        "trades": len(trades),
-        "wins": wins,
-        "losses": losses,
+        "trades": len(recent),
+        "wins": sum(1 for t in recent if t["pnl"] > 0),
+        "losses": sum(1 for t in recent if t["pnl"] < 0),
     }
     snap.trade_totals = {
-        "total_trades": float(len(trades)),
+        "total_trades": float(len(recent)),
         "total_notional_usd": notional,
         "total_pnl_usd": realized,
         "total_fees_usd": 0.0,
     }
     snap.recent_trades = recent
-
-    for p in open_positions:
-        snap.open_positions.append({
-            "venue": "polymarket",
-            "ticker": getattr(p, "slug", "") or getattr(p, "title", "") or "",
-            "title": getattr(p, "title", "") or "BTC up/down",
-            "outcome": getattr(p, "outcome", ""),
-            "size": _dollars(getattr(p, "current_size", None)),
-            "avg_price": _normalize_price(getattr(p, "avg_price", None)),
-            "current_value": _dollars(getattr(p, "current_value", None)),
-            "realized_pnl": _dollars(getattr(p, "realized_pnl", None)),
-            "unrealized_pnl": _dollars(getattr(p, "unrealized_pnl", None)),
-        })
     return snap
 
 

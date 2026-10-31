@@ -18,7 +18,7 @@ from typing import Any
 
 import httpx
 
-from btc_edge.connectors.poly_client import compute_window_ts, next_window_ts, slug_for
+from btc_edge.connectors.poly_client import next_window_ts
 from btc_edge.web.app import EngineState
 
 logger = logging.getLogger(__name__)
@@ -77,34 +77,29 @@ class LiveMarketFeed:
             return float(amount) if amount is not None else None
 
     def fetch_polymarket(self) -> dict[str, dict[str, Any]]:
-        from btc_edge.connectors.poly_client import GammaClient
+        from btc_edge.connectors.poly_client import PolymarketUSClient
 
-        gamma = GammaClient(self.gamma_base_url)
+        # Polymarket US (polymarket.us) publishes public BBOs with no auth; only a
+        # 15-minute BTC up/down market exists (no 5m/10m like polymarket.com).
+        client = PolymarketUSClient()
         out: dict[str, dict[str, Any]] = {}
-        for tf, label in TIMEFRAMES:
-            window_ts = compute_window_ts(time.time(), tf)
-            slug = slug_for(tf, window_ts)
-            try:
-                res = gamma.resolve_market(slug, tf, window_ts)
-            except Exception as exc:  # noqa: BLE001 - best-effort per-market
-                logger.debug("Polymarket %s unavailable: %s", label, exc)
-                continue
-            if res is None:
-                continue
-            prices = res.outcome_prices or []
-            up = float(prices[0]) if len(prices) > 0 else 0.0
-            down = float(prices[1]) if len(prices) > 1 else 0.0
-            if up <= 0 and down <= 0:
-                continue
-            out[label] = {
-                "up": up,
-                "down": down,
-                "prob_up": up,
-                "open_strike": res.open_reference_price,
-                "up_token_id": res.up_token_id,
-                "down_token_id": res.down_token_id,
-                "condition_id": res.condition_id,
-            }
+        res = client.resolve_15m()
+        bid = res.get("bid")
+        ask = res.get("ask")
+        mid = res.get("mid")
+        prob_up = mid if mid is not None else (ask if ask is not None else bid)
+        if prob_up is None:
+            return out
+        slug = res.get("slug", "")
+        out["15m"] = {
+            "up": prob_up,
+            "down": 1.0 - prob_up,
+            "prob_up": prob_up,
+            "open_strike": None,
+            "slug": slug,
+            "up_token_id": slug,
+            "down_token_id": slug,
+        }
         return out
 
     async def fetch_kalshi(self) -> dict[str, Any]:

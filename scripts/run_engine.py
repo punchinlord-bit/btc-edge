@@ -59,7 +59,7 @@ async def _news_loop(settings, intelligence: NewsIntelligence) -> None:
         await asyncio.sleep(refresh)
 
 
-async def _portfolio_loop(settings, engine_state, kalshi_client, poly_client, pm_wallet) -> None:
+async def _portfolio_loop(settings, engine_state, kalshi_client, poly_client) -> None:
     """Periodically refresh REAL portfolio data (balances, fills, settlements,
     positions) from Kalshi + Polymarket and publish it to the dashboard."""
     from btc_edge.execution.portfolio_poller import poll_kalshi, poll_polymarket
@@ -89,7 +89,7 @@ async def _portfolio_loop(settings, engine_state, kalshi_client, poly_client, pm
                 log.warning("Kalshi portfolio poll error: %s", exc)
         if poly_client is not None:
             try:
-                p = await poll_polymarket(poly_client, wallet=pm_wallet)
+                p = await poll_polymarket(poly_client)
                 engine_state.wallet_balances["polymarket"] = p.balance
                 engine_state.venue_stats["polymarket"] = p.venue_stats
                 recent.extend(p.recent_trades)
@@ -166,7 +166,7 @@ def main() -> int:
 
     # Build live order-routing clients (only if API keys are present).
     from btc_edge.connectors.kalshi_client import KalshiClient, build_kalshi_signer_from_env
-    from btc_edge.connectors.poly_client import GammaClient, PolymarketClient
+    from btc_edge.connectors.poly_client import PolymarketUSClient
 
     kalshi_client: Any | None = None
     signer = build_kalshi_signer_from_env()
@@ -174,25 +174,12 @@ def main() -> int:
         kalshi_client = KalshiClient(signer=signer, base_url=settings.kalshi.active_base_url)
 
     poly_client: Any | None = None
-    pm_wallet = os.getenv("POLYMARKET_WALLET") or settings.polymarket_wallet
-    pm_key = os.getenv("POLYMARKET_PRIVATE_KEY") or settings.polymarket_private_key
-    if pm_wallet and pm_key:
-        poly_client = PolymarketClient(
-            gamma=GammaClient(settings.polymarket.gamma_api_url),
-            wallet=pm_wallet,
-            private_key=pm_key,
-        )
-        _k = pm_key.strip().lstrip("0x")
-        _wallet_ok = pm_wallet.strip().startswith("0x")
-        if not (_wallet_ok and len(_k) == 64 and all(c in "0123456789abcdefABCDEF" for c in _k)):
-            print("=" * 70)
-            print("WARNING: Polymarket credentials look malformed (trading will be")
-            print("Kalshi-only until fixed). The SDK needs an EVM private key and")
-            print("wallet address, e.g.:")
-            print("  POLYMARKET_PRIVATE_KEY=<64 hex chars>")
-            print("  POLYMARKET_WALLET=0x<40 hex chars>")
-            print("Your .env currently has a base64 key + UUID wallet instead.")
-            print("=" * 70)
+    # Polymarket US (polymarket.us) authenticates with a Key ID + Secret Key from
+    # polymarket.us/developer — NOT the EVM wallet used on polymarket.com.
+    pm_key_id = os.getenv("POLYMARKET_API_KEY_ID")
+    pm_secret = os.getenv("POLYMARKET_API_SECRET")
+    if pm_key_id and pm_secret:
+        poly_client = PolymarketUSClient(key_id=pm_key_id, secret_key=pm_secret)
 
     # Start the trading loop: strategies → router → paper/live settlement.
     trader = TradingLoop(
@@ -203,7 +190,7 @@ def main() -> int:
     loop.create_task(trader.run())
 
     # Refresh REAL portfolio data (balances, fills, settlements, positions).
-    loop.create_task(_portfolio_loop(settings, engine_state, kalshi_client, poly_client, pm_wallet))
+    loop.create_task(_portfolio_loop(settings, engine_state, kalshi_client, poly_client))
 
     print(f"BTC-Edge engine starting in mode={settings.trading.mode!r}")
     print(f"Live trading allowed: {settings.live_trading_allowed()}")

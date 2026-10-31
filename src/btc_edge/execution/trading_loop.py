@@ -40,8 +40,7 @@ logger = logging.getLogger(__name__)
 # (venue, timeframe) pair trains its own ensemble so the model tracks each
 # market independently.
 TRADING_WINDOWS: tuple[tuple[int, str, str], ...] = (
-    (300, "polymarket", "5m"),
-    (900, "polymarket", "15m"),
+    (900, "polymarket", "15m"),  # Polymarket US cpc-btc-updown-15m up/down binary
     (900, "kalshi", "15m"),  # KXBTC15M = "BTC price up in next 15 mins?" up/down binary
 )
 IMPLIED_VOL_DEFAULT = 0.5  # annualized BTC IV proxy when Deribit DVOL is unavailable
@@ -392,8 +391,8 @@ class TradingLoop:
 
     async def _route_decisions(self, decisions: list[Any], tf: int, venue: str, label: str) -> None:
         pm = self.state.polymarket_markets.get(label, {})
-        up_token = pm.get("up_token_id") or ""
-        down_token = pm.get("down_token_id") or ""
+        # Polymarket US uses one market slug for both sides (no per-outcome token IDs).
+        pm_slug = pm.get("slug") or pm.get("up_token_id") or ""
         for d in decisions:
             size = self.router.size_for(d, venue=venue)
             if size <= 0:
@@ -405,7 +404,7 @@ class TradingLoop:
             is_maker = d.order_type == "maker"
             fee = fee_models.fee(venue, size, d.price, is_maker)
             notional = d.price * size
-            token = up_token if d.side == "up" else down_token
+            token = pm_slug
             kal = self.state.kalshi_market or {}
             try:
                 await self.router.place_order_async(

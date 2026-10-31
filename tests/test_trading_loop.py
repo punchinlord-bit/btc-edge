@@ -23,9 +23,8 @@ def test_builds_all_strategies():
     assert {"late_scalp", "market_maker", "crowd_follow", "iv_mispricing"} <= names
 
 
-def test_trading_windows_are_5m_and_15m():
+def test_trading_windows_are_15m():
     assert set(TRADING_WINDOWS) == {
-        (300, "polymarket", "5m"),
         (900, "polymarket", "15m"),
         (900, "kalshi", "15m"),
     }
@@ -34,15 +33,16 @@ def test_trading_windows_are_5m_and_15m():
 def test_build_context_uses_live_data():
     loop, state = _make_loop()
     state.btc_price = 100_000.0
-    state.window_countdowns = {"5m": 150.0, "15m": 750.0}
-    state.polymarket_markets = {"5m": {"up": 0.55, "down": 0.45, "prob_up": 0.55}}
+    state.window_countdowns = {"15m": 750.0}
+    state.polymarket_markets = {"15m": {"up": 0.55, "down": 0.45, "prob_up": 0.55,
+                                        "slug": "cpc-btc-updown-15m-x"}}
     state.price_history = [(0.0, 99_000.0), (3.0, 99_500.0), (6.0, 100_000.0)]
-    ctx = loop._build_context(300, "polymarket", "5m")
+    ctx = loop._build_context(900, "polymarket", "15m")
     assert ctx is not None
     assert ctx.venue == "polymarket"
     assert ctx.current_spot == 100_000.0
     assert ctx.contract_price == 0.55
-    assert ctx.time_remaining == 150.0
+    assert ctx.time_remaining == 750.0
     assert ctx.regime in {"DAMPENING", "AMPLIFYING"}
     assert ctx.bids and ctx.asks
 
