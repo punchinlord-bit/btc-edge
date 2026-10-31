@@ -29,7 +29,7 @@ class MarketMakerStrategy(Strategy):
         self.min_spread = min_spread
         self.refresh_seconds = refresh_seconds
         self.spot_move_pct = spot_move_pct
-        self._last_quote_ts: float = 0.0
+        self._last_quote_ts: dict[str, float] = {}
         self.rule = self._build_rule()
 
     def _build_rule(self) -> RuleGroup:
@@ -41,9 +41,11 @@ class MarketMakerStrategy(Strategy):
         )
 
     def evaluate(self, ctx: MarketContext) -> list[StrategyDecision]:
-        # Throttle: only re-quote every ``refresh_seconds`` (avoids flooding the
-        # book / the dashboard with identical quotes every 2s tick).
-        if time.time() - self._last_quote_ts < self.refresh_seconds:
+        # Throttle per-venue: only re-quote each market every ``refresh_seconds``
+        # (avoids flooding the book / dashboard with identical quotes every 2s tick,
+        # while still quoting Kalshi and Polymarket independently).
+        venue = getattr(ctx, "venue", "default")
+        if time.time() - self._last_quote_ts.get(venue, 0.0) < self.refresh_seconds:
             return []
         snapshot = self.rule.snapshot(ctx.features())
         if not snapshot["result"]:
@@ -53,7 +55,7 @@ class MarketMakerStrategy(Strategy):
         if spread < self.min_spread:
             return []
 
-        self._last_quote_ts = time.time()
+        self._last_quote_ts[venue] = time.time()
 
         fair = ctx.prob_estimate
         decisions: list[StrategyDecision] = []
