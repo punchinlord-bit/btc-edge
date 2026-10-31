@@ -85,13 +85,19 @@ class Router:
     def live_allowed(self) -> bool:
         return self.settings.live_trading_allowed()
 
-    def size_for(self, decision: StrategyDecision, venue: str | None = None) -> float:
-        """Compute the Quarter-Kelly position size for a decision."""
-        bankroll = self.settings.trading.bankroll
+    def size_for(
+        self, decision: StrategyDecision, venue: str | None = None, bankroll: float | None = None
+    ) -> float:
+        """Compute the Quarter-Kelly position size for a decision.
+
+        ``bankroll`` defaults to the configured value, but the live loop passes the
+        *actual* wallet balance so sizing always scales with the money in the account.
+        """
+        br = bankroll if (bankroll is not None and bankroll > 0) else self.settings.trading.bankroll
         cap_pct = self.settings.trading.quarter_kelly_cap_pct
         prob = decision.prob_estimate
         price = decision.price
-        dollar = quarter_kelly_size(prob, price, bankroll, cap_pct)
+        dollar = quarter_kelly_size(prob, price, br, cap_pct)
         size = shares_from_dollars(dollar, price)
         v = venue or _venue(decision, self.settings)
         size = fee_models.apply_min_order(v, size)

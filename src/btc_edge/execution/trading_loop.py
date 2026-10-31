@@ -394,7 +394,13 @@ class TradingLoop:
         # Polymarket US uses one market slug for both sides (no per-outcome token IDs).
         pm_slug = pm.get("slug") or pm.get("up_token_id") or ""
         for d in decisions:
-            size = self.router.size_for(d, venue=venue)
+            # Scale to the venue's LIVE wallet balance (the portfolio poller keeps
+            # engine_state.wallet_balances current). Skip a drained venue so we never
+            # spend money the account does not actually hold.
+            live_balance = self.state.wallet_balances.get(venue)
+            if live_balance is not None and live_balance < 1.0:
+                continue
+            size = self.router.size_for(d, venue=venue, bankroll=live_balance)
             if size <= 0:
                 continue
             # No paper/simulated trading: only REAL exchange orders are recorded.

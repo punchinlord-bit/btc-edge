@@ -111,6 +111,78 @@ _assistant: AIAssistant = build_assistant(_settings)
 _registry: Registry = Registry()
 _boot_ts = time.time()
 
+# ---- Champion/Challenger gate + operator readiness (booleans only, no secrets) ----
+_OPERATORS = [
+    {
+        "id": "op1",
+        "label": "Operator 1 (Self)",
+        "kalshi": "OP1_KALSHI_KEY_ID",
+        "poly": "OP1_POLY_WALLET",
+        "armed": False,
+    },
+    {
+        "id": "op2",
+        "label": "Operator 2 (Partner)",
+        "kalshi": "OP2_KALSHI_KEY_ID",
+        "poly": "OP2_POLY_WALLET",
+        "armed": False,
+    },
+]
+
+
+def _operators_view(live: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    """Operator readiness as booleans only — never expose key material."""
+    live = live or {}
+    signal = "UP" if (live.get("championProbUp") or 0.5) >= 0.5 else "DOWN"
+    out: list[dict[str, Any]] = []
+    for o in _OPERATORS:
+        out.append(
+            {
+                "id": o["id"],
+                "label": o["label"],
+                "armed": o["armed"],
+                "kalshiReady": bool(os.getenv(o["kalshi"])),
+                "polymarketReady": bool(os.getenv(o["poly"])),
+                "signal": signal,
+            }
+        )
+    return out
+
+
+def _gate_to_chart(result: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Translate the Python GateResult into the rocket chart's gate shape."""
+    if not result:
+        return None
+    checks = result.get("checks") or {}
+    regimes = result.get("regime_win_rates") or {}
+    active = [r for r in regimes if isinstance(regimes.get(r), (int, float))]
+    min_regime = min(active, key=lambda r: regimes[r]) if active else None
+    min_rate = regimes[min_regime] if min_regime is not None else None
+    passed = bool(result.get("passed", False))
+    ev_bps = round((result.get("challenger_net_ev", 0.0) - result.get("champion_net_ev", 0.0)) * 10000)
+    gate_name = {
+        "brier": "brier",
+        "net_ev": "ev",
+        "regime_floor": "regime",
+        "jitter": "jitter",
+        "sample_floor": "sample",
+    }
+    failed = [name for key, name in gate_name.items() if not checks.get(key, True)]
+    return {
+        "verdict": "PROMOTED" if passed else "REJECTED",
+        "failed": failed,
+        "gates": {
+            "brier": {
+                "pass": checks.get("brier", False),
+                "challenger": result.get("challenger_brier", 0.0),
+                "champion": result.get("champion_brier", 0.0),
+            },
+            "ev": {"pass": checks.get("net_ev", False), "edgeBps": ev_bps},
+            "regime": {"pass": checks.get("regime_floor", False), "min": min_rate, "minRegime": min_regime},
+            "jitter": {"pass": checks.get("jitter", False), "retention": result.get("jitter_retention", 0.0)},
+        },
+    }
+
 
 def _apply_kill(armed: bool, source: str) -> None:
     engine_state.kill_switch = armed
@@ -125,13 +197,15 @@ def _apply_kill(armed: bool, source: str) -> None:
 
 @app.get("/api/status", dependencies=[Depends(require_auth)])
 def status() -> JSONResponse:
-    return JSONResponse({
-        "mode": engine_state.mode,
-        "kill_switch": engine_state.kill_switch,
-        "regime": engine_state.regime,
-        "live_allowed": _settings.live_trading_allowed(),
-        "trade_only_keys": _settings.safety.trade_only_keys,
-    })
+    return JSONResponse(
+        {
+            "mode": engine_state.mode,
+            "kill_switch": engine_state.kill_switch,
+            "regime": engine_state.regime,
+            "live_allowed": _settings.live_trading_allowed(),
+            "trade_only_keys": _settings.safety.trade_only_keys,
+        }
+    )
 
 
 @app.get("/api/health")
@@ -142,24 +216,26 @@ def health() -> JSONResponse:
 
 @app.get("/api/metrics", dependencies=[Depends(require_auth)])
 def metrics() -> JSONResponse:
-    return JSONResponse({
-        "window_countdowns": engine_state.window_countdowns,
-        "brti_60s": engine_state.brti_60s,
-        "open_strike": engine_state.open_strike,
-        "strategy_metrics": engine_state.strategy_metrics,
-        "equity_curve": engine_state.equity_curve,
-        "btc_price": engine_state.btc_price,
-        "price_history": engine_state.price_history,
-        "polymarket_markets": engine_state.polymarket_markets,
-        "kalshi_market": engine_state.kalshi_market,
-        "recent_trades": engine_state.recent_trades,
-        "trade_totals": engine_state.trade_totals,
-        "venue_stats": engine_state.venue_stats,
-        "wallet_balances": engine_state.wallet_balances,
-        "open_positions": engine_state.open_positions,
-        "risk": engine_state.risk,
-        "feed_updated_at": engine_state.feed_updated_at,
-    })
+    return JSONResponse(
+        {
+            "window_countdowns": engine_state.window_countdowns,
+            "brti_60s": engine_state.brti_60s,
+            "open_strike": engine_state.open_strike,
+            "strategy_metrics": engine_state.strategy_metrics,
+            "equity_curve": engine_state.equity_curve,
+            "btc_price": engine_state.btc_price,
+            "price_history": engine_state.price_history,
+            "polymarket_markets": engine_state.polymarket_markets,
+            "kalshi_market": engine_state.kalshi_market,
+            "recent_trades": engine_state.recent_trades,
+            "trade_totals": engine_state.trade_totals,
+            "venue_stats": engine_state.venue_stats,
+            "wallet_balances": engine_state.wallet_balances,
+            "open_positions": engine_state.open_positions,
+            "risk": engine_state.risk,
+            "feed_updated_at": engine_state.feed_updated_at,
+        }
+    )
 
 
 @app.get("/api/overview", dependencies=[Depends(require_auth)])
@@ -170,20 +246,22 @@ def overview() -> JSONResponse:
     risk = engine_state.risk
     at_risk = risk.get("at_risk_usd", 0.0)
     totals = engine_state.trade_totals
-    return JSONResponse({
-        "mode": engine_state.mode,
-        "kill_switch": engine_state.kill_switch,
-        "regime": engine_state.regime,
-        "news_tone": tone,
-        "news_sentiment": sentiment,
-        "at_risk_usd": at_risk,
-        "signals": engine_state.signals,
-        "total_trades": totals.get("total_trades", 0),
-        "total_notional_usd": totals.get("total_notional_usd", 0.0),
-        "total_pnl_usd": totals.get("total_pnl_usd", 0.0),
-        "total_fees_usd": totals.get("total_fees_usd", 0.0),
-        "advice": _advice_text(sentiment, engine_state.regime, engine_state.kill_switch),
-    })
+    return JSONResponse(
+        {
+            "mode": engine_state.mode,
+            "kill_switch": engine_state.kill_switch,
+            "regime": engine_state.regime,
+            "news_tone": tone,
+            "news_sentiment": sentiment,
+            "at_risk_usd": at_risk,
+            "signals": engine_state.signals,
+            "total_trades": totals.get("total_trades", 0),
+            "total_notional_usd": totals.get("total_notional_usd", 0.0),
+            "total_pnl_usd": totals.get("total_pnl_usd", 0.0),
+            "total_fees_usd": totals.get("total_fees_usd", 0.0),
+            "advice": _advice_text(sentiment, engine_state.regime, engine_state.kill_switch),
+        }
+    )
 
 
 def _advice_text(sentiment: float, regime: str, killed: bool) -> str:
@@ -205,28 +283,51 @@ def signals() -> JSONResponse:
 
 @app.get("/api/news", dependencies=[Depends(require_auth)])
 def news() -> JSONResponse:
-    return JSONResponse({
-        "sentiment": engine_state.news_sentiment,
-        "headlines": engine_state.news_headlines,
-    })
+    return JSONResponse(
+        {
+            "sentiment": engine_state.news_sentiment,
+            "headlines": engine_state.news_headlines,
+        }
+    )
 
 
 @app.get("/api/btc-15m/telemetry", dependencies=[Depends(require_auth)])
 def btc_15m_telemetry() -> JSONResponse:
     """Current 15m window state + Champion/Challenger gate scorecard."""
     telemetry = _registry.telemetry()
-    return JSONResponse({
-        "window_start_sec": int(time.time() // 900) * 900,
-        "window_end_sec": int(time.time() // 900) * 900 + 900,
-        "strike_price": engine_state.open_strike,
-        "current_price": engine_state.btc_price,
-        "champion_version_id": telemetry["champion_version_id"],
-        "champion_prob_up": engine_state.kalshi_market.get("prob_up"),
-        "orderbook_imbalance": engine_state.brti_60s,
-        "latest_news_signal": engine_state.news_sentiment,
-        "oos_window_count": telemetry["oos_window_count"],
-        "last_result": telemetry["last_result"],
-    })
+    now = int(time.time())
+    start = (now // 900) * 900
+    live = {
+        "windowStartSec": start,
+        "windowEndSec": start + 900,
+        "strikePrice": engine_state.open_strike,
+        "currentPrice": engine_state.btc_price,
+        "championVersionId": telemetry["champion_version_id"],
+        "championProbUp": engine_state.kalshi_market.get("prob_up"),
+        "challengerProbUp": None,
+        "orderbookImbalance": engine_state.brti_60s,
+        "latestNewsSignal": engine_state.news_sentiment,
+    }
+    gate = _gate_to_chart(_registry.last_result or telemetry.get("last_result"))
+    return JSONResponse(
+        {
+            **live,
+            "gate": gate,
+            "operators": _operators_view(live),
+            "serverTime": now,
+            # snake_case aliases kept for the existing dashboard.
+            "window_start_sec": start,
+            "window_end_sec": start + 900,
+            "strike_price": engine_state.open_strike,
+            "current_price": engine_state.btc_price,
+            "champion_version_id": telemetry["champion_version_id"],
+            "champion_prob_up": engine_state.kalshi_market.get("prob_up"),
+            "orderbook_imbalance": engine_state.brti_60s,
+            "latest_news_signal": engine_state.news_sentiment,
+            "oos_window_count": telemetry["oos_window_count"],
+            "last_result": telemetry["last_result"],
+        }
+    )
 
 
 @app.post("/api/btc-15m/gate/evaluate", dependencies=[Depends(require_auth)])
@@ -253,6 +354,27 @@ async def btc_15m_gate_evaluate(request: Request) -> JSONResponse:
 
     return JSONResponse(result)
 
+
+@app.post("/api/btc-15m/operators/{op_id}/arm", dependencies=[Depends(require_auth)])
+async def btc_15m_operator_arm(op_id: str, request: Request) -> JSONResponse:
+    """Arm/disarm an operator (booleans only — never returns keys)."""
+    op = next((o for o in _OPERATORS if o["id"] == op_id), None)
+    if op is None:
+        return JSONResponse({"error": "unknown operator"}, status_code=404)
+    try:
+        payload = await request.json()
+    except Exception:  # noqa: BLE001 - empty body is fine
+        payload = {}
+    op["armed"] = bool(payload.get("armed", False))
+    return JSONResponse({"id": op_id, "armed": op["armed"]})
+
+
+@app.get("/rocket", response_class=HTMLResponse)
+def rocket() -> HTMLResponse:
+    path = TEMPLATE_DIR / "rocketChart.html"
+    if not path.exists():
+        return HTMLResponse("<html><body><h1>Rocket Chart</h1><p>Template missing.</p></body></html>")
+    return HTMLResponse(path.read_text(encoding="utf-8"))
 
 
 @app.post("/api/assistant", dependencies=[Depends(require_auth)])
@@ -308,6 +430,11 @@ async def ws_live(ws: WebSocket, x_api_key: str | None = Header(default=None)) -
     await ws.accept()
     try:
         while True:
+            # Emit a rocket-chart tick frame ({"type":"tick","price":number}) alongside
+            # the full dashboard snapshot.
+            price = engine_state.btc_price
+            if price is not None:
+                await ws.send_json({"type": "tick", "price": price})
             await ws.send_json(engine_state.snapshot())
             await asyncio.sleep(1.0)
     except WebSocketDisconnect:
