@@ -161,8 +161,15 @@ async def poll_kalshi(client: Any, ticker: str | None = None, limit: int = 200) 
 async def poll_polymarket(client: Any, wallet: str | None = None, limit: int = 100) -> PortfolioSnapshot:
     """Fetch and normalize the Polymarket account (balance, positions, trades)."""
     snap = PortfolioSnapshot()
+    # The connector wrapper exposes the authenticated AsyncSecureClient lazily.
     try:
-        bal = await client.get_balance_allowance(asset_type="COLLATERAL")
+        secure = await client.secure_client()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Polymarket secure client unavailable: %s", exc)
+        return snap
+
+    try:
+        bal = await secure.get_balance_allowance(asset_type="COLLATERAL")
         snap.balance = _dollars(getattr(bal, "balance", None))
     except Exception as exc:  # noqa: BLE001
         logger.warning("Polymarket balance poll failed: %s", exc)
@@ -171,20 +178,20 @@ async def poll_polymarket(client: Any, wallet: str | None = None, limit: int = 1
     closed_positions: list[Any] = []
     try:
         open_positions = list(
-            (await client.list_positions(user=wallet, status="OPEN", page_size=limit).first_page()).items
+            (await secure.list_positions(user=wallet, status="OPEN", page_size=limit).first_page()).items
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("Polymarket open positions poll failed: %s", exc)
     try:
         closed_positions = list(
-            (await client.list_positions(user=wallet, status="CLOSED", page_size=limit).first_page()).items
+            (await secure.list_positions(user=wallet, status="CLOSED", page_size=limit).first_page()).items
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("Polymarket closed positions poll failed: %s", exc)
 
     trades: list[Any] = []
     try:
-        trades = list((await client.list_account_trades().first_page()).items)
+        trades = list((await secure.list_account_trades().first_page()).items)
     except Exception as exc:  # noqa: BLE001
         logger.warning("Polymarket trades poll failed: %s", exc)
 

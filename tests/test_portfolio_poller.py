@@ -82,7 +82,7 @@ class _FakePosition:
             setattr(self, k, v)
 
 
-class _FakePoly:
+class _FakeSecure:
     async def get_balance_allowance(self, asset_type=None):
         return _FakePosition(balance=100.0)
 
@@ -102,6 +102,11 @@ class _FakePoly:
         return _FakePaginator([
             _FakePosition(side="BUY", price=0.5, size=5.0, outcome="Yes", matched_at=1_700_000_000),
         ])
+
+
+class _FakePoly:
+    async def secure_client(self):
+        return _FakeSecure()
 
 
 def test_poll_polymarket_normalizes_real_data():
