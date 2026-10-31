@@ -414,7 +414,8 @@ class TradingLoop:
                     kalshi_ticker=kal.get("ticker") if venue == "kalshi" else None,
                 )
             except Exception as exc:  # noqa: BLE001 - never crash the loop
-                logger.warning("live order placement error (%s): %s", venue, exc)
+                detail = getattr(getattr(exc, "response", None), "text", "") or str(exc)
+                logger.warning("live order placement error (%s): %s", venue, detail)
                 continue  # do not record failed placements
 
             # Record the REAL order that was just submitted to the exchange.
