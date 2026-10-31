@@ -138,20 +138,40 @@ class Router:
     def _route_live(
         self, venue: str, decision: StrategyDecision, price: float, size: float, is_maker: bool
     ) -> None:
+        """Legacy sync hook (kept for compatibility). Real placement is async — see
+        :meth:`place_order_async`."""
+        # Intentionally a no-op: the trading loop calls place_order_async() so the
+        # async exchange clients can be awaited correctly.
+
+    async def place_order_async(
+        self,
+        venue: str,
+        decision: StrategyDecision,
+        price: float,
+        size: float,
+        is_maker: bool,
+        token_id: str | None = None,
+    ) -> None:
+        """Submit a real order to the exchange (awaited async)."""
         if venue == "kalshi" and self.kalshi_client is not None:
             side = "yes" if decision.side == "up" else "no"
-            self.kalshi_client.place_order(
+            await self.kalshi_client.place_order(
                 ticker=self.settings.kalshi.market_ticker,
                 side=side,
                 action=decision.action,
-                count=int(size),
+                count=max(1, int(round(size))),
                 price=price,
                 post_only=is_maker,
             )
-        elif venue == "polymarket" and self.poly_client is not None:
-            # Polymarket order submission via the secure client.
-            self.poly_client.public_client  # noqa: B018 - ensure client ready
-        # Otherwise, no client configured: fall through (recorded as paper).
+        elif venue == "polymarket" and self.poly_client is not None and token_id:
+            secure = await self.poly_client.secure_client()
+            await secure.create_limit_order(
+                token_id=token_id,
+                price=price,
+                size=size,
+                side="BUY" if decision.action == "buy" else "SELL",
+                post_only=is_maker,
+            )
 
     def _settle_paper(self, order: RoutedOrder, outcome: float | None) -> None:
         if outcome is None:

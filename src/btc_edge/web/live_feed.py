@@ -101,6 +101,9 @@ class LiveMarketFeed:
                 "down": down,
                 "prob_up": up,
                 "open_strike": res.open_reference_price,
+                "up_token_id": res.up_token_id,
+                "down_token_id": res.down_token_id,
+                "condition_id": res.condition_id,
             }
         return out
 

@@ -50,7 +50,14 @@ FEED_SAMPLE_HZ = 1.0 / 3.0  # live feed polls ~every 3s
 class TradingLoop:
     """Orchestrates the strategy → router → settlement cycle against live data."""
 
-    def __init__(self, state: EngineState, settings: Settings, feed: LiveMarketFeed) -> None:
+    def __init__(
+        self,
+        state: EngineState,
+        settings: Settings,
+        feed: LiveMarketFeed,
+        kalshi_client: Any | None = None,
+        poly_client: Any | None = None,
+    ) -> None:
         self.state = state
         self.settings = settings
         self.feed = feed
@@ -61,7 +68,7 @@ class TradingLoop:
             rv_iv_threshold=settings.features.vol_rv_iv_threshold,
             funding_zscore_threshold=settings.features.funding_zscore_threshold,
         )
-        self.router = Router(settings)
+        self.router = Router(settings, kalshi_client=kalshi_client, poly_client=poly_client)
         self.safety = SafetyWatchdog(
             bankroll=settings.trading.bankroll,
             max_daily_loss_pct=settings.trading.max_daily_loss_pct,
@@ -274,7 +281,10 @@ class TradingLoop:
             asks=asks,
         )
 
-    def _route_decisions(self, decisions: list[Any], tf: int, venue: str) -> None:
+    async def _route_decisions(self, decisions: list[Any], tf: int, venue: str, label: str) -> None:
+        pm = self.state.polymarket_markets.get(label, {})
+        up_token = pm.get("up_token_id") or ""
+        down_token = pm.get("down_token_id") or ""
         for d in decisions:
             size = self.router.size_for(d)
             if size <= 0:
@@ -296,6 +306,16 @@ class TradingLoop:
             vs = self._venue_stats[venue]
             vs["notional_usd"] += notional
             vs["trades"] += 1
+
+            # Place a REAL order on the exchange when live trading is enabled.
+            if self.router.live_allowed:
+                token = up_token if d.side == "up" else down_token
+                try:
+                    await self.router.place_order_async(
+                        venue, d, d.price, size, is_maker, token_id=token
+                    )
+                except Exception as exc:  # noqa: BLE001 - never crash the loop
+                    logger.warning("live order placement error (%s): %s", venue, exc)
 
     def _update_state(self, ctx: MarketContext, decisions: list[Any]) -> None:
         self.state.regime = ctx.regime
@@ -340,7 +360,7 @@ class TradingLoop:
                 except Exception as exc:  # noqa: BLE001
                     logger.debug("%s evaluate error: %s", strat.name, exc)
             if decisions and not self.state.kill_switch:
-                self._route_decisions(decisions, tf, venue)
+                await self._route_decisions(decisions, tf, venue, label)
             all_decisions.extend(decisions)
 
         if last_ctx is not None:

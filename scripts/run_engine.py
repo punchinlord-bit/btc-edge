@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import sys
+from typing import Any
 
 from btc_edge.config import load_settings
 from btc_edge.connectors.news_scraper import NewsScraper
@@ -121,8 +123,30 @@ def main() -> int:
     )
     loop.create_task(feed.run())
 
-    # Start the trading loop: strategies → router → paper settlement.
-    trader = TradingLoop(engine_state, settings, feed)
+    # Build live order-routing clients (only if API keys are present).
+    from btc_edge.connectors.kalshi_client import KalshiClient, build_kalshi_signer_from_env
+    from btc_edge.connectors.poly_client import GammaClient, PolymarketClient
+
+    kalshi_client: Any | None = None
+    signer = build_kalshi_signer_from_env()
+    if signer is not None:
+        kalshi_client = KalshiClient(signer=signer, base_url=settings.kalshi.active_base_url)
+
+    poly_client: Any | None = None
+    pm_wallet = os.getenv("POLYMARKET_WALLET")
+    pm_key = os.getenv("POLYMARKET_PRIVATE_KEY")
+    if pm_wallet and pm_key:
+        poly_client = PolymarketClient(
+            gamma=GammaClient(settings.polymarket.gamma_api_url),
+            wallet=pm_wallet,
+            private_key=pm_key,
+        )
+
+    # Start the trading loop: strategies → router → paper/live settlement.
+    trader = TradingLoop(
+        engine_state, settings, feed,
+        kalshi_client=kalshi_client, poly_client=poly_client,
+    )
     loop.create_task(trader.run())
 
     # Refresh the Kalshi wallet balance periodically (only if API keys are set).
@@ -131,8 +155,6 @@ def main() -> int:
     print(f"BTC-Edge engine starting in mode={settings.trading.mode!r}")
     print(f"Live trading allowed: {settings.live_trading_allowed()}")
     print(f"Trade-only keys enforced: {settings.safety.trade_only_keys}")
-
-    import os
 
     port = int(os.getenv("PORT", settings.web.port))
     print(f"Dashboard: http://{settings.web.host}:{port}")
