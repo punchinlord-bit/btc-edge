@@ -40,6 +40,23 @@
   </div>
 
   <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+    <div class="card md:col-span-2">
+      <div class="flex items-center justify-between mb-1">
+        <h2 class="text-sm uppercase tracking-wide text-gray-400">Live BTC Price</h2>
+        <span id="feed-age" class="text-xs text-gray-500">connecting…</span>
+      </div>
+      <div class="text-4xl font-mono font-bold text-green-400"><span id="btc-price">--</span></div>
+      <canvas id="price-chart" height="120"></canvas>
+    </div>
+    <div class="card">
+      <h2 class="text-sm uppercase tracking-wide text-gray-400 mb-2">Polymarket (Up %)</h2>
+      <div id="poly-markets" class="space-y-3"></div>
+      <h2 class="text-sm uppercase tracking-wide text-gray-400 mb-2 mt-4">Kalshi (Yes %)</h2>
+      <div id="kalshi-meter"></div>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
     <div class="card">
       <h2 class="text-sm uppercase tracking-wide text-gray-400 mb-2">Window Countdown</h2>
       <div id="countdowns" class="space-y-1 text-lg font-mono"></div>
@@ -94,6 +111,7 @@
 
   <script>
     let chart = null;
+    let priceChart = null;
     let apiKey = localStorage.getItem('btcApiKey') || '';
     function apiHeaders() {
       return apiKey ? { 'X-API-Key': apiKey } : {};
@@ -111,6 +129,19 @@
         options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: false } } }
       });
     }
+    function initPriceChart() {
+      const ctx = document.getElementById('price-chart').getContext('2d');
+      priceChart = new Chart(ctx, {
+        type: 'line',
+        data: { labels: [], datasets: [{ label: 'BTC', data: [], borderColor: '#4ade80', tension: 0.2, fill: false, pointRadius: 0 }] },
+        options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: false } } }
+      });
+    }
+    function pctBar(p, color) {
+      if (p == null || isNaN(p)) return '<div class="text-gray-500">--</div>';
+      const w = Math.max(0, Math.min(100, p * 100));
+      return `<div class="w-full bg-gray-800 rounded-full h-3"><div class="h-3 rounded-full ${color}" style="width:${w}%"></div></div>`;
+    }
 
     function render(s) {
       document.getElementById('mode-badge').textContent = s.mode;
@@ -126,13 +157,52 @@
       document.getElementById('news-tone').textContent = s.news_tone || '--';
       document.getElementById('regime-text').textContent = s.regime || '--';
 
+      // Live BTC price + feed age.
+      document.getElementById('btc-price').textContent = s.btc_price != null ? '$' + Number(s.btc_price).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '--';
+      if (s.feed_updated_at) {
+        const age = Math.max(0, Math.round((Date.now() / 1000) - s.feed_updated_at));
+        document.getElementById('feed-age').textContent = 'updated ' + age + 's ago';
+      } else {
+        document.getElementById('feed-age').textContent = 'connecting…';
+      }
+      if (priceChart) {
+        const hist = s.price_history || [];
+        priceChart.data.labels = hist.map((_, i) => i);
+        priceChart.data.datasets[0].data = hist.map(e => e[1]);
+        priceChart.update();
+      }
+
+      // Polymarket meters (5m/10m/15m Up probability).
+      const poly = s.polymarket_markets || {};
+      const polyEl = document.getElementById('poly-markets');
+      const tfOrder = ['5m', '10m', '15m'];
+      polyEl.innerHTML = tfOrder.map(tf => {
+        const m = poly[tf];
+        if (!m) return `<div><div class="text-xs text-gray-400 mb-1">${tf}</div>${pctBar(null, '')}</div>`;
+        const up = (m.up ?? m.prob_up ?? 0) * 100;
+        const down = (m.down ?? 0) * 100;
+        return `<div><div class="flex justify-between text-xs text-gray-400 mb-1"><span>${tf}</span><span class="text-green-400">▲ ${up.toFixed(0)}%</span></div>${pctBar(m.prob_up ?? m.up, 'bg-green-500')}<div class="flex justify-between text-xs text-gray-500 mt-1"><span>Down</span><span class="text-red-400">▼ ${down.toFixed(0)}%</span></div></div>`;
+      }).join('') || '<div class="text-gray-500">No Polymarket data yet</div>';
+
+      // Kalshi meter.
+      const kal = s.kalshi_market || {};
+      const kalEl = document.getElementById('kalshi-meter');
+      const yes = kal.prob_up != null ? kal.prob_up * 100 : null;
+      kalEl.innerHTML = `<div class="flex justify-between text-xs text-gray-400 mb-1"><span>Yes</span><span class="text-green-400">${yes != null ? yes.toFixed(0) + '%' : '--'}</span></div>${pctBar(kal.prob_up, 'bg-blue-500')}<div class="text-xs text-gray-500 mt-1">No ${yes != null ? (100 - yes).toFixed(0) : '--'}%</div>`;
+
       const sig = document.getElementById('signals');
       sig.innerHTML = (s.signals && s.signals.length)
         ? s.signals.slice(0, 6).map(x => `<li>${x}</li>`).join('')
         : '<li class="text-gray-500">No active signal</li>';
 
       const cd = document.getElementById('countdowns');
-      cd.innerHTML = Object.entries(s.window_countdowns || {}).map(([k, v]) => `<div>${k}: <span class="text-yellow-400">${Number(v).toFixed(0)}s</span></div>`).join('') || '<div class="text-gray-500">--</div>';
+      const winTotal = { '5m': 300, '10m': 600, '15m': 900 };
+      cd.innerHTML = Object.entries(s.window_countdowns || {}).map(([k, v]) => {
+        const total = winTotal[k] || 300;
+        const remain = Math.max(0, Number(v));
+        const pct = Math.min(100, (remain / total) * 100);
+        return `<div class="mb-2"><div class="flex justify-between text-xs text-gray-400 mb-1"><span>${k}</span><span class="text-yellow-400 font-mono">${remain.toFixed(0)}s</span></div><div class="w-full bg-gray-800 rounded-full h-2"><div class="h-2 rounded-full bg-yellow-500" style="width:${pct}%"></div></div></div>`;
+      }).join('') || '<div class="text-gray-500">--</div>';
 
       const tbody = document.getElementById('strategy-table');
       tbody.innerHTML = Object.entries(s.strategy_metrics || {}).map(([name, m]) =>
@@ -189,6 +259,7 @@
 
     ensureKey();
     initChart();
+    initPriceChart();
     poll();
     setInterval(poll, 1000);
   </script>

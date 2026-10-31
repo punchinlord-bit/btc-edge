@@ -20,6 +20,7 @@ from btc_edge.execution.killswitch import KillSwitch
 from btc_edge.features.sentiment_analyzer import SentimentAnalyzer
 from btc_edge.ml.self_healing_filter import NewsIntelligence, SelfHealingFilter
 from btc_edge.web.app import app, engine_state
+from btc_edge.web.live_feed import LiveMarketFeed
 
 
 def _setup_logging(level: str) -> None:
@@ -94,6 +95,16 @@ def main() -> int:
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     loop.create_task(_news_loop(settings, intelligence))
+
+    # Start the live market feed (BTC price, Polymarket + Kalshi markets,
+    # window countdowns) so the dashboard shows live, accurate data.
+    feed = LiveMarketFeed(
+        engine_state,
+        gamma_base_url=settings.polymarket.gamma_api_url,
+        kalshi_base_url=settings.kalshi.active_base_url,
+        kalshi_ticker=settings.kalshi.market_ticker,
+    )
+    loop.create_task(feed.run())
 
     print(f"BTC-Edge engine starting in mode={settings.trading.mode!r}")
     print(f"Live trading allowed: {settings.live_trading_allowed()}")

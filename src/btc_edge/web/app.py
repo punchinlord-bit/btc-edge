@@ -58,6 +58,11 @@ class EngineState:
         self.risk: dict[str, float] = {}
         self.signals: list[str] = []
         self.news_headlines: list[dict[str, Any]] = []
+        self.btc_price: float | None = None
+        self.price_history: list[tuple[float, float]] = []
+        self.polymarket_markets: dict[str, dict[str, Any]] = {}
+        self.kalshi_market: dict[str, Any] = {}
+        self.feed_updated_at: float = 0.0
         self.updated_at: float = time.time()
 
     def snapshot(self) -> dict[str, Any]:
@@ -75,6 +80,11 @@ class EngineState:
             "risk": self.risk,
             "signals": self.signals,
             "news_headlines": self.news_headlines,
+            "btc_price": self.btc_price,
+            "price_history": self.price_history,
+            "polymarket_markets": self.polymarket_markets,
+            "kalshi_market": self.kalshi_market,
+            "feed_updated_at": self.feed_updated_at,
             "updated_at": self.updated_at,
         }
 
@@ -126,6 +136,11 @@ def metrics() -> JSONResponse:
         "open_strike": engine_state.open_strike,
         "strategy_metrics": engine_state.strategy_metrics,
         "equity_curve": engine_state.equity_curve,
+        "btc_price": engine_state.btc_price,
+        "price_history": engine_state.price_history,
+        "polymarket_markets": engine_state.polymarket_markets,
+        "kalshi_market": engine_state.kalshi_market,
+        "feed_updated_at": engine_state.feed_updated_at,
     })
 
 
