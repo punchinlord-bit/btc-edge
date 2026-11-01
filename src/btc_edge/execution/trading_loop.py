@@ -556,6 +556,8 @@ class TradingLoop:
             if ctx is None:
                 continue
             last_ctx = ctx
+            # Expose our model's own up-probability per venue (the "ahead" reading).
+            self.state.model_prob[venue] = ctx.prob_estimate
             decisions: list[Any] = []
             for strat in self.strategies:
                 try:

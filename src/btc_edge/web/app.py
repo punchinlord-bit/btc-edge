@@ -77,6 +77,8 @@ class EngineState:
         self.price_history: list[tuple[float, float]] = []
         self.polymarket_markets: dict[str, dict[str, Any]] = {}
         self.kalshi_market: dict[str, Any] = {}
+        # Our model's own up-probability per venue (the "ahead" reading vs market).
+        self.model_prob: dict[str, float] = {}
         self.feed_updated_at: float = 0.0
         self.recent_trades: list[dict[str, Any]] = []
         self.trade_totals: dict[str, float] = {}
@@ -104,6 +106,7 @@ class EngineState:
             "price_history": self.price_history,
             "polymarket_markets": self.polymarket_markets,
             "kalshi_market": self.kalshi_market,
+            "model_prob": self.model_prob,
             "recent_trades": self.recent_trades,
             "trade_totals": self.trade_totals,
             "venue_stats": self.venue_stats,
@@ -330,6 +333,7 @@ def btc_15m_telemetry(venue: str = "kalshi") -> JSONResponse:
         "championVersionId": telemetry["champion_version_id"],
         "championProbUp": prob_up,
         "challengerProbUp": None,
+        "modelProbUp": engine_state.model_prob.get(venue),
         "orderbookImbalance": engine_state.brti_60s,
         "latestNewsSignal": engine_state.news_sentiment,
     }
