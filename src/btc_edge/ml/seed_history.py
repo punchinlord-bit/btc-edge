@@ -11,6 +11,7 @@ real BTC move (``floor_strike`` -> ``expiration_value``) plus the up/down
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from typing import Any
@@ -156,19 +157,33 @@ async def seed_ensemble_from_polymarket(
 
 
 def _resolved_outcome(events: list[dict[str, Any]]) -> float | None:
-    """Return 1.0 (up won) / 0.0 (down won) for a resolved Polymarket market."""
+    """Return 1.0 (up won) / 0.0 (down won) for a resolved Polymarket market.
+
+    Gamma returns ``outcomes`` / ``outcomePrices`` / ``clobTokenIds`` as
+    *stringified* JSON arrays (e.g. ``'["Up","Down"]'`` / ``'["0","1"]'``), so we
+    ``json.loads`` them first. The winning leg has price ``"1"`` (>= 0.99) and the
+    loser ``"0"`` once the market is closed.
+    """
     for event in events:
         for market in event.get("markets", []):
-            prices = market.get("outcomePrices") or market.get("outcome_prices")
-            if not prices:
+            if not (market.get("closed") or market.get("resolved")):
                 continue
+            prices_raw = market.get("outcomePrices") or market.get("outcome_prices")
+            if prices_raw is None:
+                continue
+            if isinstance(prices_raw, str):
+                try:
+                    prices = json.loads(prices_raw)
+                except json.JSONDecodeError:
+                    continue
+            else:
+                prices = prices_raw
             try:
                 vals = [float(p) for p in prices]
             except (TypeError, ValueError):
                 continue
-            if len(vals) != 2:
+            if len(vals) < 2:
                 continue
-            # Resolved: exactly one leg at ~1.0 and the other at ~0.0.
             if vals[0] >= 0.99 and vals[1] <= 0.01:
                 return 1.0
             if vals[1] >= 0.99 and vals[0] <= 0.01:

@@ -57,33 +57,29 @@ class MarketMakerStrategy(Strategy):
 
         self._last_quote_ts[venue] = time.time()
 
-        # Buy the side the model actually predicts — NOT always "up". On Kalshi we
-        # must be a TAKER (buy at the ask, IOC): maker/GTC orders rest on the book
-        # and need USDC margin (``insufficient_balance``); taker fills pay in USD.
-        # Polymarket US supports resting maker orders on both legs, so keep those.
+        # Buy the side the model predicts. On Kalshi we can only go LONG YES (the
+        # down leg would need USDC margin the account doesn't hold), so when the
+        # model says "down" we simply stand aside instead of chasing up or trying
+        # a margin order. Polymarket US supports resting maker orders on both legs.
         fair = ctx.contract_price
         prob_up = ctx.prob_estimate
         direction = "up" if prob_up >= 0.5 else "down"
         decisions: list[StrategyDecision] = []
+        if venue == "kalshi" and direction != "up":
+            return decisions  # can't go short/down without margin — stand aside
         for lvl in range(self.levels):
             if venue == "kalshi":
-                if direction == "up":
-                    buy_price = min(0.99, round(fair + (lvl + 1) * (spread / 2.0), 2))
-                    prob = prob_up
-                else:
-                    # Long down = buy the NO leg. NO price ≈ 1 - YES bid.
-                    buy_price = min(0.99, round((1.0 - fair) + (lvl + 1) * (spread / 2.0), 2))
-                    prob = 1.0 - prob_up
+                buy_price = min(0.99, round(fair + (lvl + 1) * (spread / 2.0), 2))
                 decisions.append(StrategyDecision(
                     strategy=self.name,
-                    side=direction,
+                    side="up",
                     action="buy",
                     price=buy_price,
                     size=5.0,
                     order_type="taker",
-                    reason=f"taker buy {direction} level {lvl + 1}",
-                    prob_estimate=prob,
-                    ev_estimate=prob - buy_price,
+                    reason=f"taker buy up level {lvl + 1}",
+                    prob_estimate=prob_up,
+                    ev_estimate=prob_up - buy_price,
                     rule_snapshot=snapshot,
                 ))
             else:
