@@ -46,6 +46,12 @@ class TradingConfig(BaseModel):
     polymarket_cap_pct: float = 1.0
     polymarket_exposure_pct: float = 20.0
     min_ev_threshold: float = 0.01
+    # Don't open a new position on a side that has ALREADY moved this window.
+    # ``window_delta_pct`` is in percent; e.g. 0.1 means "skip up-bets once BTC is
+    # already +0.1% since open" (chasing). 0 disables the guard.
+    chase_guard_pct: float = 0.1
+    # Seconds at the start of a window to stay flat (let information develop).
+    entry_warmup_seconds: float = 60.0
 
     @field_validator(
         "bankroll",
@@ -54,6 +60,8 @@ class TradingConfig(BaseModel):
         "max_exposure_pct",
         "polymarket_cap_pct",
         "polymarket_exposure_pct",
+        "chase_guard_pct",
+        "entry_warmup_seconds",
     )
     @classmethod
     def _positive(cls, v: float) -> float:

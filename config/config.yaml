@@ -8,6 +8,8 @@ trading:
   polymarket_cap_pct: 2.0       # opened up for testing (was 1.0)
   polymarket_exposure_pct: 35.0 # opened up for testing (was 20.0)
   min_ev_threshold: 0.01        # minimum expected-value edge (net of fees) before firing
+  chase_guard_pct: 0.1          # don't buy a side that already moved >0.1% this window (anti-chase)
+  entry_warmup_seconds: 60.0    # stay flat for the first 60s of a window (let info develop)
 
 polymarket:
   gamma_api_url: "https://gamma-api.polymarket.com"

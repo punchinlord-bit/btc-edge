@@ -514,6 +514,30 @@ class TradingLoop:
             )
             self.state.signals = [f"No edge yet — news is {tone}. Waiting for a setup."]
 
+    def _filter_entries(self, decisions: list[Any], ctx: MarketContext, tf: int) -> list[Any]:
+        """Drop entries that chase an already-moved side or fire too early.
+
+        - Warmup: stay flat for the first ``entry_warmup_seconds`` of the window
+          (no information to act on yet).
+        - Anti-chase: skip "up" bets once BTC is already up ``chase_guard_pct``%
+          since open (and symmetrically for "down"), so the bot never buys a move
+          that has already happened.
+        """
+        chase = self.settings.trading.chase_guard_pct
+        warmup = self.settings.trading.entry_warmup_seconds
+        delta = ctx.window_delta_pct
+        remaining = ctx.time_remaining
+        kept: list[Any] = []
+        for d in decisions:
+            if remaining > tf - warmup:
+                continue
+            if d.side == "up" and delta > chase:
+                continue
+            if d.side == "down" and delta < -chase:
+                continue
+            kept.append(d)
+        return kept
+
     def _flip_reversals(self, ctx: MarketContext, venue: str, decisions: list[Any]) -> None:
         """Exit-and-reverse when the ensemble signal flips mid-window.
 
@@ -565,6 +589,7 @@ class TradingLoop:
                 except Exception as exc:  # noqa: BLE001
                     logger.debug("%s evaluate error: %s", strat.name, exc)
             self._flip_reversals(ctx, venue, decisions)
+            decisions = self._filter_entries(decisions, ctx, tf)
             if decisions and not self.state.kill_switch:
                 await self._route_decisions(decisions, tf, venue, label)
             all_decisions.extend(decisions)
