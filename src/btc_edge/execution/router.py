@@ -129,9 +129,14 @@ class Router:
         size = fee_models.apply_min_order(v, size)
         if size <= 0:
             # With a small bankroll the Quarter-Kelly size can fall below the venue
-            # minimum and get rejected. Only then do we lift to the minimum (and
-            # only because we've already confirmed prob > price above).
-            size = fee_models.POLYMARKET_MIN_SHARES if v == "polymarket" else 1.0
+            # minimum. Only lift to the minimum if it does NOT blow through the
+            # per-trade cap — a 5-share Polymarket minimum is a huge slice of a
+            # small account and was the source of "90%-of-the-wallet" bets.
+            min_shares = fee_models.POLYMARKET_MIN_SHARES if v == "polymarket" else 1.0
+            cap = br * cap_pct / 100.0
+            if min_shares * price > cap:
+                return 0.0
+            size = min_shares
         return size
 
     def route(self, decision: StrategyDecision, venue: str, outcome: float | None = None) -> RoutedOrder:

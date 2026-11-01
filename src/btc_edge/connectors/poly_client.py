@@ -451,7 +451,18 @@ class PolymarketUSClient:
             "quantity": quantity,
             "tif": tif,
         }
-        return self.client.orders.create(params)
+        resp = self.client.orders.create(params)
+        # Polymarket returns HTTP 200 even for REJECTED orders — the rejection is
+        # reported in ``executions[].type == EXECUTION_TYPE_REJECTED`` with an
+        # ``orderRejectReason``. Surface it as an error so the trading loop does
+        # not record a phantom "fill" (and Telegram alert) for an order that was
+        # never accepted on the venue.
+        executions = resp.get("executions") if isinstance(resp, dict) else []
+        for ex in executions or []:
+            if ex.get("type") == "EXECUTION_TYPE_REJECTED":
+                reason = ex.get("orderRejectReason") or ex.get("text") or "unknown"
+                raise RuntimeError(f"Polymarket order rejected: {reason}")
+        return resp
 
     async def place_order(
         self, slug: str, side: str, action: str, price: float, size: float, is_maker: bool = False
