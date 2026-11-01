@@ -322,6 +322,13 @@ class TradingLoop:
                 "fee": pos["fee"],
                 "pnl": trade_pnl,
             })
+            self._append_trade_log({
+                "type": "settle", "ts": time.time(), "tf": tf,
+                "venue": pos.get("venue", ""), "strategy": pos["strategy"],
+                "side": pos["side"], "action": pos["action"], "price": pos["price"],
+                "size": pos["size"], "notional": pos.get("notional"),
+                "fee": pos["fee"], "pnl": trade_pnl,
+            })
         self._open = remaining
         self._recent_trades = self._recent_trades[-50:]
         self._venue_stats[venue]["pnl_usd"] += pnl
@@ -474,6 +481,12 @@ class TradingLoop:
                 "strategy": d.strategy, "prob": d.prob_estimate,
                 "notional": notional, "ts": time.time(),
             })
+            self._append_trade_log({
+                "type": "signal", "ts": time.time(), "tf": tf, "venue": venue,
+                "strategy": d.strategy, "side": d.side, "action": d.action,
+                "price": d.price, "size": size, "prob": d.prob_estimate,
+                "notional": notional, "fee": fee,
+            })
             m = self._metrics[d.strategy]
             m["trades"] += 1
             m["net_ev"] += d.ev_estimate
@@ -617,6 +630,24 @@ class TradingLoop:
         if self.safety.daily_loss_limit_breached():
             self.state.kill_switch = True
             self.safety.trigger_kill_switch()
+
+    def _append_trade_log(self, record: dict[str, Any]) -> None:
+        """Append one signal/settlement record to ``data/trades.jsonl`` (best-effort).
+
+        This is the permanent "brain" ledger of every bet the bot makes and its
+        outcome, independent of the in-memory loops, so the learning process can
+        be audited and replayed.
+        """
+        import json
+        from pathlib import Path
+
+        try:
+            path = Path("data/trades.jsonl")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(record, default=str) + "\n")
+        except Exception as exc:  # noqa: BLE001 - logging must never crash the loop
+            logger.warning("trade log append failed: %s", exc)
 
     async def run(self, interval: float = 2.0) -> None:
         while True:
