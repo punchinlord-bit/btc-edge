@@ -400,13 +400,22 @@ class TradingLoop:
         pm = self.state.polymarket_markets.get(label, {})
         # Polymarket US uses one market slug for both sides (no per-outcome token IDs).
         pm_slug = pm.get("slug") or pm.get("up_token_id") or ""
+        # Scale to the venue's LIVE wallet balance (the portfolio poller keeps
+        # engine_state.wallet_balances current). Never trade on an unknown or drained
+        # balance — sizing against a stale/unknown balance is exactly what let a
+        # single cycle bet the whole account.
+        live_balance = self.state.wallet_balances.get(venue)
+        if live_balance is None or live_balance < 1.0:
+            return
+        # "Don't burn the bankroll": cap the total open notional for this venue at
+        # max_exposure_pct% of the live balance. We track the notional of orders
+        # already recorded this run (self._open) plus what we're about to place, so
+        # the bot can never stack many minimum-size orders into a full-bankroll
+        # position between balance polls.
+        br = live_balance if live_balance > 0 else self.settings.trading.bankroll
+        max_exposure = br * self.settings.trading.max_exposure_pct / 100.0
+        exposure = sum(p["price"] * p["size"] for p in self._open if p.get("venue") == venue)
         for d in decisions:
-            # Scale to the venue's LIVE wallet balance (the portfolio poller keeps
-            # engine_state.wallet_balances current). Skip a drained venue so we never
-            # spend money the account does not actually hold.
-            live_balance = self.state.wallet_balances.get(venue)
-            if live_balance is not None and live_balance < 1.0:
-                continue
             size = self.router.size_for(d, venue=venue, bankroll=live_balance)
             if size <= 0:
                 continue
@@ -417,6 +426,12 @@ class TradingLoop:
             is_maker = d.order_type == "maker"
             fee = fee_models.fee(venue, size, d.price, is_maker)
             notional = d.price * size
+            if exposure + notional > max_exposure:
+                logger.info(
+                    "exposure cap hit (%s): %.2f + %.2f > %.2f",
+                    venue, exposure, notional, max_exposure,
+                )
+                continue
             token = pm_slug
             kal = self.state.kalshi_market or {}
             try:
@@ -431,6 +446,7 @@ class TradingLoop:
                 continue  # do not record failed placements
 
             # Record the REAL order that was just submitted to the exchange.
+            exposure += notional
             self._open.append({
                 "tf": tf, "venue": venue, "side": d.side, "action": d.action,
                 "price": d.price, "size": size, "fee": fee,

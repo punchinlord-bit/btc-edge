@@ -26,12 +26,24 @@ DEFAULT_CONFIG_PATH = Path("config/config.yaml")
 class TradingConfig(BaseModel):
     mode: Literal["paper", "live"] = "paper"
     base_currency: str = "USD"
-    bankroll: float = 100.0
+    bankroll: float = 20.0
     max_daily_loss_pct: float = 5.0
-    quarter_kelly_cap_pct: float = 10.0
+    # Per-trade cap: max risk on any single order, as % of the (live) bankroll.
+    # Kept deliberately small so a single wager can never be a large slice of
+    # the account. With a tiny account the venue minimum (5 shares Polymarket /
+    # 1 contract Kalshi) still applies, so the *exposure* cap below is what
+    # actually keeps the bot from stacking orders into the whole bankroll.
+    quarter_kelly_cap_pct: float = 2.0
+    # Total open notional (per venue) may never exceed this % of the live
+    # balance. This is the "don't burn the bankroll" guard: it stops the bot
+    # from piling multiple minimum-size orders on top of each other between
+    # balance polls.
+    max_exposure_pct: float = 35.0
     min_ev_threshold: float = 0.01
 
-    @field_validator("bankroll", "max_daily_loss_pct", "quarter_kelly_cap_pct")
+    @field_validator(
+        "bankroll", "max_daily_loss_pct", "quarter_kelly_cap_pct", "max_exposure_pct"
+    )
     @classmethod
     def _positive(cls, v: float) -> float:
         if v <= 0:

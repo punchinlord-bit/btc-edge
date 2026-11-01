@@ -7,7 +7,7 @@ import time
 
 import pytest
 
-from btc_edge.config import load_settings
+from btc_edge.config import TradingConfig, load_settings
 from btc_edge.execution.router import (
     Router,
     kelly_fraction,
@@ -50,6 +50,24 @@ def test_kelly_fraction():
 def test_quarter_kelly_capped():
     size = quarter_kelly_size(prob=0.6, price=0.5, bankroll=10000.0, cap_pct=10.0)
     assert size == pytest.approx(500.0, rel=1e-6)
+
+
+def test_trading_config_conservative_defaults():
+    """Position sizing defaults must be small and bankroll-aware so a single
+    wager can never be a large slice of the account, and total open exposure is
+    capped. These are the knobs behind the 'don't burn the bankroll' behavior."""
+    cfg = TradingConfig()
+    assert cfg.bankroll == 20.0
+    assert cfg.quarter_kelly_cap_pct == 2.0
+    assert cfg.max_exposure_pct == 35.0
+    assert cfg.max_daily_loss_pct == 5.0
+
+
+def test_quarter_kelly_small_cap_pct():
+    """With the conservative 2% cap, a $10 bankroll yields at most $0.20 per trade."""
+    size = quarter_kelly_size(prob=0.6, price=0.5, bankroll=10.0, cap_pct=2.0)
+    # 0.25 * ((0.6 - 0.5) / 0.5) * 10 = 0.5, but capped at 2% * 10 = 0.20.
+    assert size == pytest.approx(0.20, rel=1e-6)
 
 
 def test_router_paper_mode_no_live():
