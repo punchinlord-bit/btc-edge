@@ -322,6 +322,9 @@ function draw(now,m,fairP,horizon){
 
 // ---- backend wiring (all optional; page runs standalone in demo mode) ----
 const API=(new URLSearchParams(location.search).get('api')||'')+'/api/btc-15m';
+const VENUE=(new URLSearchParams(location.search).get('venue')||'kalshi');
+document.title='BTC ROCKET · '+VENUE.toUpperCase();
+const h1=document.querySelector('h1');if(h1)h1.textContent='BTC ROCKET · '+VENUE.toUpperCase();
 let live=null,opsData=[{id:'op1',label:'Operator 1 (Self)',kalshiReady:true,polymarketReady:true,armed:false,signal:'UP'},{id:'op2',label:'Operator 2 (Partner)',kalshiReady:true,polymarketReady:false,armed:false,signal:'UP'}],connected=false;
 function setBadge(id,pass){const e=$(id);e.textContent=pass==null?'--':pass?'PASS':'FAIL';e.className=pass==null?'bw':pass?'bp':'bf'}
 function renderGate(g){
@@ -348,7 +351,7 @@ function renderOps(){
 $('ops').onclick=async e=>{const id=e.target.dataset&&e.target.dataset.id;if(!id)return;const o=opsData.find(x=>x.id===id);o.armed=!o.armed;renderOps();
   if(connected)fetch(API+`/operators/${id}/arm`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({armed:o.armed})}).catch(()=>{})};
 async function poll(){
-  try{const r=await fetch(API+'/telemetry');if(!r.ok)throw 0;const t=await r.json();connected=true;live=t;
+  try{const r=await fetch(API+'/telemetry?venue='+VENUE);if(!r.ok)throw 0;const t=await r.json();connected=true;live=t;
     $('gsrc').textContent='Live from backend · '+(t.championVersionId||'no champion');
     if(t.operators){opsData=t.operators;renderOps()}if(t.gate)renderGate(t.gate)}
   catch(e){connected=false}

@@ -84,6 +84,9 @@ class TradingLoop:
 
         self._alerter = build_alerter(settings)
         self._last_alert_ts = 0.0
+        # Track which (window_end, venue) we've already sent a "last minute" heads-up
+        # for, so each 15m window fires exactly one notification per venue.
+        self._notified_last_minute: set[tuple[int, str]] = set()
 
         self._windows: dict[tuple[int, str], dict[str, Any]] = {
             (tf, venue): {"window_ts": None, "open_price": None, "last_features": {}}
@@ -544,9 +547,50 @@ class TradingLoop:
         while True:
             try:
                 await self.tick()
+                self._maybe_notify_last_minute(time.time())
             except Exception as exc:  # noqa: BLE001 - the loop must never die
                 logger.warning("Trading loop error: %s", exc)
             await asyncio.sleep(interval)
+
+    def _maybe_notify_last_minute(self, now: float) -> None:
+        """Send a Telegram heads-up in the final minute of each 15m window.
+
+        Fires once per (window_end, venue) so both Kalshi and Polymarket get a
+        "closing soon" notification at T-60s with the current BTC price, the open
+        reference, and the model's up/down call.
+        """
+        if not self._alerter.enabled:
+            return
+        spot = self.state.btc_price
+        for tf, venue, label in TRADING_WINDOWS:
+            window_end = (int(now) // tf + 1) * tf
+            remaining = window_end - now
+            if remaining <= 0 or remaining > 60:
+                continue
+            key = (window_end, venue)
+            if key in self._notified_last_minute:
+                continue
+            self._notified_last_minute.add(key)
+
+            if venue == "kalshi":
+                prob = self.state.kalshi_market.get("prob_up")
+                strike = self.state.open_strike
+            else:
+                pm = self.state.polymarket_markets.get(label, {})
+                prob = pm.get("prob_up") or pm.get("up")
+                strike = pm.get("open_price") or self.state.open_strike
+
+            direction = "UP" if (prob is not None and prob >= 0.5) else "DOWN"
+            prob_txt = f"{prob:.0%}" if isinstance(prob, (int, float)) else "--"
+            price_txt = f"${spot:,.0f}" if isinstance(spot, (int, float)) else "--"
+            strike_txt = f"${strike:,.0f}" if isinstance(strike, (int, float)) else "--"
+            text = (
+                f"⏰ {venue.upper()} 15m closing in {int(remaining)}s\n"
+                f"BTC {price_txt} (open {strike_txt}) → {direction}\n"
+                f"Model P(up) = {prob_txt}"
+            )
+            with contextlib.suppress(Exception):
+                asyncio.create_task(self._alerter.send(text))
 
     async def seed_from_history(self) -> None:
         """Best-effort: pre-train both venue ensembles from real resolved markets.

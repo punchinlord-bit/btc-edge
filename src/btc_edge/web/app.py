@@ -306,18 +306,29 @@ def news() -> JSONResponse:
 
 
 @app.get("/api/btc-15m/telemetry", dependencies=[Depends(require_auth)])
-def btc_15m_telemetry() -> JSONResponse:
-    """Current 15m window state + Champion/Challenger gate scorecard."""
+def btc_15m_telemetry(venue: str = "kalshi") -> JSONResponse:
+    """Current 15m window state + Champion/Challenger gate scorecard.
+
+    ``venue`` is ``kalshi`` (default) or ``polymarket``; each venue reports its
+    own market's implied up-probability so the two rocket widgets diverge.
+    """
     telemetry = _registry.telemetry()
     now = int(time.time())
     start = (now // 900) * 900
+    if venue == "polymarket":
+        pm = engine_state.polymarket_markets.get("15m", {})
+        prob_up = pm.get("prob_up") or pm.get("up")
+        strike = pm.get("open_price") or engine_state.open_strike
+    else:
+        prob_up = engine_state.kalshi_market.get("prob_up")
+        strike = engine_state.open_strike
     live = {
         "windowStartSec": start,
         "windowEndSec": start + 900,
-        "strikePrice": engine_state.open_strike,
+        "strikePrice": strike,
         "currentPrice": engine_state.btc_price,
         "championVersionId": telemetry["champion_version_id"],
-        "championProbUp": engine_state.kalshi_market.get("prob_up"),
+        "championProbUp": prob_up,
         "challengerProbUp": None,
         "orderbookImbalance": engine_state.brti_60s,
         "latestNewsSignal": engine_state.news_sentiment,
@@ -332,10 +343,10 @@ def btc_15m_telemetry() -> JSONResponse:
             # snake_case aliases kept for the existing dashboard.
             "window_start_sec": start,
             "window_end_sec": start + 900,
-            "strike_price": engine_state.open_strike,
+            "strike_price": strike,
             "current_price": engine_state.btc_price,
             "champion_version_id": telemetry["champion_version_id"],
-            "champion_prob_up": engine_state.kalshi_market.get("prob_up"),
+            "champion_prob_up": prob_up,
             "orderbook_imbalance": engine_state.brti_60s,
             "latest_news_signal": engine_state.news_sentiment,
             "oos_window_count": telemetry["oos_window_count"],
