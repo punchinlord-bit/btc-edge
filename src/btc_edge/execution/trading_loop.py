@@ -347,12 +347,18 @@ class TradingLoop:
             "regime_amplifying": 1.0 if regime_str == "AMPLIFYING" else 0.0,
         }
         prob = self._ensembles[(tf, venue)].predict(feats, tf)
-        # Momentum prior: blend the window's realized direction into the signal so
-        # it tracks BTC's actual move instead of pinning near 0.5. This lets the
-        # ensemble find real directional edge (buy strength, fade weakness) while
-        # the router's prob>price edge filter still gates every order.
+        # Calibration: the online ensemble overfits small samples and is
+        # overconfident (it pins ~60% "up" while BTC settles ~50/50), so shrink
+        # it toward the market's implied probability. The market is near-efficient
+        # and well-calibrated; the model only earns when it holds a *persistent*
+        # edge that survives the shrinkage.
+        market_prob = max(0.01, min(0.99, contract_price))
+        prob = 0.5 * prob + 0.5 * market_prob
+        # Momentum tilt: lean with BTC's realized move only when it is meaningful.
+        # A 15m move below 0.15% (~1 std dev) is noise and gets zero weight; the
+        # tilt caps at 30% weight so a single choppy move can't dominate.
         momentum = max(0.05, min(0.95, 0.5 + window_delta * 1.5))
-        blend = min(0.5, abs(window_delta) * 150.0)
+        blend = min(0.3, max(0.0, (abs(window_delta) - 0.15) * 2.0))
         prob = (1.0 - blend) * prob + blend * momentum
         prob = max(0.01, min(0.99, prob))
         w["last_features"] = feats
