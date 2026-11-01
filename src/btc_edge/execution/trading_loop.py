@@ -96,6 +96,9 @@ class TradingLoop:
             for tf, venue, _ in TRADING_WINDOWS
         }
         self._open: list[dict[str, Any]] = []
+        # Idempotency guard: keys of orders already placed this window, so the
+        # market-maker's periodic re-quotes don't stack duplicate orders.
+        self._placed_order_keys: set[str] = set()
         self._total_pnl = 0.0
         self._equity_curve: list[tuple[float, float]] = []
         self._metrics: dict[str, dict[str, Any]] = {
@@ -173,6 +176,8 @@ class TradingLoop:
                 self._settle_window(tf, venue)
                 w["window_ts"] = window_ts
                 w["open_price"] = ref
+                # New window -> allow fresh (non-duplicate) orders again.
+                self._placed_order_keys.clear()
                 # Expose the new window-open reference (60s TWAP) to the dashboard/
                 # rocket widgets so their strike line matches the venue's window.
                 if ref is not None:
@@ -436,6 +441,11 @@ class TradingLoop:
             size = self.router.size_for(d, venue=venue, bankroll=live_balance)
             if size <= 0:
                 continue
+            # Idempotency: the market-maker re-quotes the same levels every 15s;
+            # skip an order we already placed this window so it doesn't stack.
+            key = f"{venue}|{d.side}|{d.action}|{d.price:.6f}"
+            if key in self._placed_order_keys:
+                continue
             # No paper/simulated trading: only REAL exchange orders are recorded.
             # When live trading is disabled, we simply skip (nothing is faked).
             if not self.router.live_allowed:
@@ -475,6 +485,7 @@ class TradingLoop:
                 "strategy": d.strategy, "prob": d.prob_estimate,
                 "notional": notional, "ts": time.time(),
             })
+            self._placed_order_keys.add(key)
             self._append_trade_log({
                 "type": "signal", "ts": time.time(), "tf": tf, "venue": venue,
                 "strategy": d.strategy, "side": d.side, "action": d.action,
