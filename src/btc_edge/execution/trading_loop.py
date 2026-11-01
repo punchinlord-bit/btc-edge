@@ -89,6 +89,7 @@ class TradingLoop:
         self._notified_last_minute: set[tuple[int, str]] = set()
         # Last ensemble signal direction per venue (for flip detection).
         self._last_signal_dir: dict[str, str] = {}
+        self._last_edge_diag_ts = 0.0
 
         self._windows: dict[tuple[int, str], dict[str, Any]] = {
             (tf, venue): {"window_ts": None, "open_price": None, "last_features": {}}
@@ -582,6 +583,15 @@ class TradingLoop:
             last_ctx = ctx
             # Expose our model's own up-probability per venue (the "ahead" reading).
             self.state.model_prob[venue] = ctx.prob_estimate
+            # Throttled diagnostic: log model prob vs book + edge side-by-side so a
+            # scale mismatch (0-1 vs 0-100) or a None/0 book is visible in the logs.
+            if time.time() - self._last_edge_diag_ts > 15.0:
+                self._last_edge_diag_ts = time.time()
+                logger.info(
+                    "edge-diag %s: model_prob=%.4f bid=%.4f ask=%.4f edge=%.4f delta_pct=%.4f",
+                    venue, ctx.prob_estimate, ctx.best_bid, ctx.best_ask,
+                    ctx.prob_estimate - ctx.best_ask, ctx.window_delta_pct,
+                )
             decisions: list[Any] = []
             for strat in self.strategies:
                 try:
