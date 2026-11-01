@@ -504,7 +504,7 @@
       }
 
       const poly = s.polymarket_markets || {};
-      document.getElementById('poly-markets').innerHTML = ['5m', '15m'].map(tf => {
+      document.getElementById('poly-markets').innerHTML = ['15m'].map(tf => {
         const m = poly[tf];
         if (!m) return '<div><div class="text-xs text-gray-400 mb-1">' + tf + ' window</div>' + pctBar(null, '') + '</div>';
         const up = (m.prob_up ?? m.up ?? 0) * 100;
