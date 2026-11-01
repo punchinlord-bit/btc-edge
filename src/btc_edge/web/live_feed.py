@@ -159,9 +159,9 @@ class LiveMarketFeed:
 
         try:
             self.state.polymarket_markets = await asyncio.to_thread(self.fetch_polymarket)
-            pm5 = self.state.polymarket_markets.get("5m")
-            if pm5 and pm5.get("open_strike") is not None:
-                self.state.open_strike = float(pm5["open_strike"])
+            # The window-open reference (open_strike) is the 60s TWAP, owned by the
+            # trading loop's _sync_window; do not overwrite it with a stale market
+            # field here.
         except Exception as exc:  # noqa: BLE001
             logger.debug("Polymarket fetch failed: %s", exc)
 

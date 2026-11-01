@@ -166,11 +166,17 @@ class TradingLoop:
             if w["window_ts"] is None:
                 w["window_ts"] = window_ts
                 w["open_price"] = ref
+                if ref is not None:
+                    self.state.open_strike = ref
                 continue
             if window_ts != w["window_ts"]:
                 self._settle_window(tf, venue)
                 w["window_ts"] = window_ts
                 w["open_price"] = ref
+                # Expose the new window-open reference (60s TWAP) to the dashboard/
+                # rocket widgets so their strike line matches the venue's window.
+                if ref is not None:
+                    self.state.open_strike = ref
 
     def _settle_window(self, tf: int, venue: str) -> None:
         w = self._windows[(tf, venue)]
