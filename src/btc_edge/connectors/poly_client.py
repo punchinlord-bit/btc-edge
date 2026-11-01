@@ -19,7 +19,6 @@ import json
 import logging
 import time
 from dataclasses import dataclass, field
-from datetime import UTC
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -260,12 +259,15 @@ def btc_updown_15m_slug(now_ts: float | None = None) -> str:
     """Current Polymarket US ``BTC Up or Down 15m`` market slug.
 
     Polymarket US (polymarket.us) lists short-horizon BTC up/down markets with
-    slugs of the form ``cpc-btc-updown-15m-{YYYY-MM-DD-HHMM}z`` where the
-    timestamp is the UTC window open floored to the 15-minute boundary.
+    slugs of the form ``cpc-btc-updown-15m-{YYYY-MM-DD-HHMM}z`` where the timestamp
+    is the **Eastern Time** window open floored to the 15-minute boundary (the "z"
+    suffix is cosmetic — the wall clock is US/Eastern, not UTC).
     """
     from datetime import datetime
+    from zoneinfo import ZoneInfo
 
-    now = datetime.now(UTC) if now_ts is None else datetime.fromtimestamp(now_ts, UTC)
+    et = ZoneInfo("America/New_York")
+    now = datetime.now(et) if now_ts is None else datetime.fromtimestamp(now_ts, et)
     window = now.replace(minute=(now.minute // 15) * 15, second=0, microsecond=0)
     return f"cpc-btc-updown-15m-{window.strftime('%Y-%m-%d-%H%M')}z"
 
