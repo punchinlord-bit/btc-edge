@@ -91,7 +91,7 @@ ai:
   model: "deepseek-chat"                    # ChatGPT: gpt-4o-mini
 
 telegram:
-  enabled: false
+  enabled: true
 
 safety:
   trade_only_keys: true                   # MUST stay true: block any withdrawal

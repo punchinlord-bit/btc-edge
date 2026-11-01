@@ -359,31 +359,6 @@ def btc_15m_telemetry(venue: str = "kalshi") -> JSONResponse:
     )
 
 
-@app.post("/api/btc-15m/gate/evaluate", dependencies=[Depends(require_auth)])
-async def btc_15m_gate_evaluate(request: Request) -> JSONResponse:
-    """Run a proposed Challenger config through the promotion gate."""
-    payload = await request.json()
-    version_id = str(payload.get("version_id") or f"challenger-{int(time.time())}")
-    config = payload.get("config") or {}
-    if not isinstance(config, dict):
-        return JSONResponse({"error": "config must be a mapping of feature -> weight"}, status_code=400)
-
-    result = _registry.evaluate_challenger(version_id, {str(k): float(v) for k, v in config.items()})
-
-    # Best-effort persistence (never crash the endpoint on a DB hiccup).
-    try:
-        from btc_edge.db.session import Database
-        from btc_edge.ml.strategy_registry import save_registry
-
-        db = Database(_settings.db_path)
-        save_registry(db.session(), _registry)
-        db.close()
-    except Exception:  # noqa: BLE001 - persistence is best-effort
-        pass
-
-    return JSONResponse(result)
-
-
 @app.post("/api/btc-15m/operators/{op_id}/arm", dependencies=[Depends(require_auth)])
 async def btc_15m_operator_arm(op_id: str, request: Request) -> JSONResponse:
     """Arm/disarm an operator (booleans only — never returns keys)."""

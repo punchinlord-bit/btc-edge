@@ -221,6 +221,17 @@ class TradingLoop:
         ens.retrain_lgbm()
         self._persist_registry()
 
+        # Brain-update notification: tell the operator what the model just learned.
+        if self._alerter.enabled:
+            direction = "UP" if outcome >= 0.5 else "DOWN"
+            spot_txt = f"${spot:,.0f}" if spot else "--"
+            open_txt = f"${open_price:,.0f}" if open_price else "--"
+            with contextlib.suppress(Exception):
+                asyncio.create_task(self._alerter.send(
+                    f"🧠 Brain update ({venue} {tf}s): BTC settled {direction}\n"
+                    f"window {open_txt} → {spot_txt}"
+                ))
+
     def _persist_registry(self) -> None:
         """Best-effort persist the registry to SQLite (throttled, never crashes)."""
         now = time.time()
