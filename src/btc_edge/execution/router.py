@@ -108,13 +108,24 @@ class Router:
             cap_pct = self.settings.trading.polymarket_cap_pct
         prob = decision.prob_estimate
         price = decision.price
+        # Never fire a zero/negative-edge order: if the model's probability is not
+        # above the price we'd pay, the "enforce minimum" fallback used to force a
+        # 5-share / 1-contract bet anyway — that's what produced careless longshot
+        # deposits (e.g. buying a ~1%-chance leg with seconds left). Skip instead.
+        if prob <= price:
+            return 0.0
+        # Skip extreme longshots/shorthots (<5% or >95%): at those prices the
+        # model's edge estimate is unreliable, and a near-0.5 default reading would
+        # otherwise "find" phantom edge on a 1%-chance leg.
+        if price < 0.05 or price > 0.95:
+            return 0.0
         dollar = quarter_kelly_size(prob, price, br, cap_pct)
         size = shares_from_dollars(dollar, price)
         size = fee_models.apply_min_order(v, size)
         if size <= 0:
             # With a small bankroll the Quarter-Kelly size can fall below the venue
-            # minimum and get rejected — which makes the bot idle. Enforce a visible
-            # minimum (5 shares Polymarket / 1 contract Kalshi) so orders actually go out.
+            # minimum and get rejected. Only then do we lift to the minimum (and
+            # only because we've already confirmed prob > price above).
             size = fee_models.POLYMARKET_MIN_SHARES if v == "polymarket" else 1.0
         return size
 

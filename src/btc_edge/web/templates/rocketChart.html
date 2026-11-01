@@ -84,7 +84,7 @@ canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
     <button id="up">Up <span id="upc">50</span>&cent;</button>
     <button id="dn">Down <span id="dnc">50</span>&cent;</button>
   </div>
-  <div class="foot"><span>Ours <b id="ours" style="color:var(--c)">--</b></span><span>Mkt <b id="mkt">--</b></span><span>Paper only</span></div>
+  <div class="foot"><span>Ours <b id="ours" style="color:var(--c)">--</b></span><span>Mkt <b id="mkt">--</b></span><span>Lead <b id="lead">--</b></span></div>
 
   <details class="card">
     <summary class="ch"><div><strong>Champion vs Challenger Gate</strong><small id="gsrc">Internal (auto, tap to expand)</small></div></summary>
@@ -222,6 +222,11 @@ function frame(nowMs){
   $('upc').textContent=pc;$('dnc').textContent=100-pc;$('pfill').style.width=pc+'%';
   if(live&&typeof live.modelProbUp==='number')$('ours').textContent=Math.round(live.modelProbUp*100)+'%';
   if(live&&typeof live.championProbUp==='number')$('mkt').textContent=Math.round(live.championProbUp*100)+'%';
+  if(live&&typeof live.modelProbUp==='number'&&typeof live.championProbUp==='number'){
+    const lead=Math.round((live.modelProbUp-live.championProbUp)*100);
+    const el=$('lead');el.textContent=(lead>=0?'+':'')+lead+'pts';
+    el.style.color=lead>=0?G:R;
+  }
 
   // side cross shockwave
   if(up!==lastSide){rings.push({x:W*.76,y:yOf(price),r:6,l:1,c:col});lastSide=up;shake=Math.max(shake,.6)}
