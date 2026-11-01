@@ -194,23 +194,15 @@ class TradingLoop:
         open_price: float,
         spot: float,
     ) -> None:
-        """Record the resolved window as an OOS sample, then gate the model update.
-
-        The online logistic update becomes a CHALLENGER; it is only applied when the
-        promotion gate clears (or when there is not yet enough OOS data to judge).
-        """
+        """Record the resolved window and update the model directly (no gate)."""
         from btc_edge.ml.model import feature_dict
-        from btc_edge.ml.promotion_gate import (
-            CHAMPION,
-            StrategyVersion,
-            WindowEvaluation,
-            classify_3regime,
-        )
+        from btc_edge.ml.promotion_gate import WindowEvaluation, classify_3regime
 
         normalized = feature_dict(features, tf)
         abs_move_pct = abs(spot - open_price) / open_price * 100.0
         regime = classify_3regime(abs_move_pct)
 
+        # Record the resolved window to the OOS ledger (the "brain").
         self.registry.record_window(WindowEvaluation(
             window_start_sec=(int(time.time()) // tf) * tf,
             strike_price=open_price,
@@ -224,50 +216,8 @@ class TradingLoop:
             fee_rate=0.015,
         ))
 
-        champion_config = ens.logreg_weights()
-        challenger_config = ens.proposed_logreg_weights(features, outcome, tf)
-
-        apply_update = True
-        if champion_config and challenger_config:
-            champion = StrategyVersion(
-                version_id=f"{venue}-{tf}-champion", status=CHAMPION,
-                market_key=venue, config=champion_config,
-            )
-            challenger = StrategyVersion(
-                version_id=f"{venue}-{tf}-{int(time.time())}",
-                market_key=venue, config=challenger_config,
-            )
-            # Evaluate the challenger ONLY against this venue's OOS windows so a
-            # Kalshi update is never judged on Polymarket outcomes (and vice versa).
-            venue_windows = [w for w in self.registry.windows if w.market_key == venue]
-            result = self.registry.gate.evaluate_and_promote(
-                challenger, venue_windows, champion
-            )
-            self.registry.last_result = {
-                "passed": result.passed,
-                "challenger_version_id": result.challenger_version_id,
-                "champion_version_id": result.champion_version_id,
-                "challenger_brier": result.challenger_brier,
-                "champion_brier": result.champion_brier,
-                "challenger_net_ev": result.challenger_net_ev,
-                "champion_net_ev": result.champion_net_ev,
-                "regime_win_rates": result.regime_win_rates,
-                "jitter_retention": result.jitter_retention,
-                "checks": result.checks,
-                "reasons": result.reasons,
-            }
-            if result.passed:
-                self.registry.champion_id = champion.version_id
-                self.registry.versions[champion.version_id] = champion
-            elif result.checks.get("sample_floor") is not False:
-                # Enough OOS data and the challenger failed a hard gate — keep champion.
-                apply_update = False
-                logger.info(
-                    "gate rejected model update (%s %ss): %s", venue, tf, result.reasons
-                )
-
-        if apply_update:
-            ens.update(features, outcome, tf)
+        # Direct online learning — no champion/challenger gate.
+        ens.update(features, outcome, tf)
         ens.retrain_lgbm()
         self._persist_registry()
 

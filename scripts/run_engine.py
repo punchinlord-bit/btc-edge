@@ -134,24 +134,6 @@ def main() -> int:
     except Exception as exc:  # noqa: BLE001 - registry load is best-effort
         print(f"Strategy registry load skipped: {exc}")
 
-    # Seed a default CHAMPION per venue if none exists so each venue's promotion
-    # gate has its own baseline. Kalshi and Polymarket learn independently (their
-    # own ensembles, windows, and champions) — they must never share a champion.
-    for _venue in ("kalshi", "polymarket"):
-        if not any(v.market_key == _venue for v in _registry.versions.values()):
-            _registry.register_champion(
-                f"champion-{_venue}-v1",
-                {
-                    "bias": 0.0,
-                    "contract_price": 0.6,
-                    "option_implied_prob": 0.2,
-                    "window_delta_pct": 0.15,
-                    "book_imbalance": 0.1,
-                    "news_sentiment": 0.05,
-                },
-                market_key=_venue,
-            )
-
     # Build the news-intelligence pipeline.
     scraper = NewsScraper(
         min_relevance=settings.news.min_relevance,
