@@ -153,32 +153,43 @@ class TradingLoop:
     def _sync_window(self, now: float) -> None:
         """Detect rollover for each trading window and settle the expired one."""
         from btc_edge.connectors.poly_client import compute_window_ts
+        from btc_edge.features.indicators import time_weighted_average
 
         spot = self.state.btc_price
+        # The Polymarket/Kalshi BTC up/down markets settle on a 60s TWAP reference
+        # (Chainlink ``btc-usd-twap-60s``), so anchor the window open price to the
+        # trailing 60s TWAP rather than a single instantaneous spot print.
+        ref = time_weighted_average(self.state.price_history, 60.0, now) or spot
         for tf, venue, _ in TRADING_WINDOWS:
             w = self._windows[(tf, venue)]
             window_ts = compute_window_ts(now, tf)
             if w["window_ts"] is None:
                 w["window_ts"] = window_ts
-                w["open_price"] = spot
+                w["open_price"] = ref
                 continue
             if window_ts != w["window_ts"]:
                 self._settle_window(tf, venue)
                 w["window_ts"] = window_ts
-                w["open_price"] = spot
+                w["open_price"] = ref
 
     def _settle_window(self, tf: int, venue: str) -> None:
         w = self._windows[(tf, venue)]
         spot = self.state.btc_price
+        from btc_edge.features.indicators import time_weighted_average
+
+        # Settle against the 60s TWAP reference (matching the market's oracle),
+        # not the instantaneous spot, so the recorded outcome aligns with how the
+        # venue actually resolves the window.
+        ref = time_weighted_average(self.state.price_history, 60.0, time.time()) or spot
         open_price = w["open_price"]
-        if spot is None or open_price is None or open_price <= 0:
+        if ref is None or open_price is None or open_price <= 0:
             self._open = [p for p in self._open if not (p.get("tf") == tf and p.get("venue") == venue)]
             return
-        outcome = 1.0 if spot >= open_price else 0.0
+        outcome = 1.0 if ref >= open_price else 0.0
         pnl = self._settle_positions(tf, venue, outcome)
         if w["last_features"]:
             ens = self._ensembles[(tf, venue)]
-            self._record_and_gate(ens, tf, venue, w["last_features"], outcome, open_price, spot)
+            self._record_and_gate(ens, tf, venue, w["last_features"], outcome, open_price, ref)
         self._total_pnl += pnl
         self._equity_curve.append((time.time(), self._total_pnl))
         if len(self._equity_curve) > 200:
@@ -302,10 +313,13 @@ class TradingLoop:
             return None
         now = time.time()
         from btc_edge.connectors.poly_client import compute_window_ts
+        from btc_edge.features.indicators import time_weighted_average
 
         window_ts = compute_window_ts(now, tf)
         w = self._windows[(tf, venue)]
         open_price = w["open_price"] if w["open_price"] else spot
+        # Reference proxy = trailing 60s TWAP (the market's oracle is a 60s TWAP).
+        ref = time_weighted_average(self.state.price_history, 60.0, now) or spot
         time_remaining = self.state.window_countdowns.get(label, float(tf))
 
         if venue == "kalshi":
@@ -326,8 +340,8 @@ class TradingLoop:
         regime = self.regime_cls.classify_raw(rvol / implied if implied > 0 else 0.0)
         regime_str = str(regime.value)
 
-        window_delta = indicators.window_delta_pct(spot, open_price)
-        option_prob = indicators.option_implied_prob(spot, open_price, implied, time_remaining)
+        window_delta = indicators.window_delta_pct(ref, open_price)
+        option_prob = indicators.option_implied_prob(ref, open_price, implied, time_remaining)
         book_imb = 0.0
         micro = 0.0
 

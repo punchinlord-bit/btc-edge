@@ -10,6 +10,7 @@ from btc_edge.features.indicators import (
     micro_acceleration,
     norm_cdf,
     option_implied_prob,
+    time_weighted_average,
     window_delta_pct,
 )
 from btc_edge.features.pattern_engine import (
@@ -56,6 +57,23 @@ def test_window_delta_pct():
     assert window_delta_pct(101.0, 100.0) == pytest.approx(1.0)
     assert window_delta_pct(99.0, 100.0) == pytest.approx(-1.0)
     assert window_delta_pct(100.0, 0.0) == 0.0
+
+
+def test_time_weighted_average():
+    # Uniform sampling over a rising price -> TWAP is the midpoint of the ramp.
+    samples = [(0.0, 100.0), (10.0, 110.0), (20.0, 120.0)]
+    assert time_weighted_average(samples, 60.0, 20.0) == pytest.approx(110.0)
+
+    # Samples after ``now`` are excluded (window is [now - lookback, now]).
+    assert time_weighted_average(samples, 60.0, 10.0) == pytest.approx(105.0)
+
+    # A single in-window sample is returned directly.
+    assert time_weighted_average(samples, 5.0, 20.0) == pytest.approx(120.0)
+
+    # Single sample and empty input.
+    assert time_weighted_average([(5.0, 42.0)], 60.0, 10.0) == pytest.approx(42.0)
+    assert time_weighted_average([], 60.0, 10.0) is None
+    assert time_weighted_average([(0.0, 0.0), (1.0, -5.0)], 60.0, 10.0) is None
 
 
 def test_book_imbalance():

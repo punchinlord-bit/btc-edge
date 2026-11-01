@@ -58,6 +58,47 @@ def window_delta_pct(current_proxy: float, window_open_price: float) -> float:
     return (current_proxy - window_open_price) / window_open_price * 100.0
 
 
+def time_weighted_average(
+    samples: Iterable[tuple[float, float]],
+    lookback_seconds: float,
+    now: float,
+) -> float | None:
+    """Time-weighted average price over the trailing ``lookback_seconds``.
+
+    ``samples`` is an iterable of ``(timestamp_seconds, price)`` pairs. Computes
+    the TWAP via trapezoidal integration over the samples that fall inside
+    ``[now - lookback_seconds, now]``. Falls back to the most recent price when
+    fewer than two samples fall inside the window, or ``None`` when there is no
+    usable price data at all.
+    """
+    cutoff = now - lookback_seconds
+    pts = [
+        (float(ts), float(p))
+        for ts, p in samples
+        if p is not None and float(p) > 0 and cutoff <= float(ts) <= now
+    ]
+    if not pts:
+        pts = [(float(ts), float(p)) for ts, p in samples if p is not None and float(p) > 0]
+    if not pts:
+        return None
+    if len(pts) == 1:
+        return pts[0][1]
+
+    total_time = 0.0
+    weighted = 0.0
+    for i in range(len(pts) - 1):
+        t0, p0 = pts[i]
+        t1, p1 = pts[i + 1]
+        dt = t1 - t0
+        if dt <= 0:
+            continue
+        total_time += dt
+        weighted += (p0 + p1) / 2.0 * dt
+    if total_time <= 0:
+        return pts[-1][1]
+    return weighted / total_time
+
+
 def book_imbalance(bid_sizes: Iterable[float], ask_sizes: Iterable[float], levels: int = 3) -> float:
     """Top-N depth imbalance in [-1, 1]."""
     bid_depth = sum(float(s) for s in list(bid_sizes)[:levels])
