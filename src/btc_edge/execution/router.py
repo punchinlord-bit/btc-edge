@@ -7,7 +7,9 @@ mode all decisions are simulated locally and recorded for grading.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import logging
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -15,6 +17,8 @@ from typing import Any
 from btc_edge.backtest import fee_models
 from btc_edge.config import Settings
 from btc_edge.strategies.base import StrategyDecision
+
+logger = logging.getLogger(__name__)
 
 
 def idempotency_key(
@@ -80,6 +84,7 @@ class Router:
         self.orders: list[RoutedOrder] = []
         self._paper_pnl = 0.0
         self._paper_fees = 0.0
+        self._last_kalshi_convert_ts = 0.0
 
     @property
     def live_allowed(self) -> bool:
@@ -161,6 +166,18 @@ class Router:
     ) -> None:
         """Submit a real order to the exchange (awaited async)."""
         if venue == "kalshi" and self.kalshi_client is not None:
+            # KXBTC15M settles on the crypto (BTC) exchange shard. The API does
+            # NOT auto-convert USD the way the web app does, so before placing an
+            # order we top up the crypto balance from USD (throttled to ~60s so we
+            # don't hammer the rate-limited balance endpoint).
+            if time.time() - self._last_kalshi_convert_ts >= 60.0:
+                self._last_kalshi_convert_ts = time.time()
+                try:
+                    converted = await self.kalshi_client.ensure_crypto_balance()
+                    if converted:
+                        await asyncio.sleep(1.0)  # let the intra-account transfer settle
+                except Exception as exc:  # noqa: BLE001 - never block trading on funding
+                    logger.warning("Kalshi crypto funding check failed: %s", exc)
             # KXBTC15M is "BTC price up in next 15 mins?" — a pure up/down binary.
             # "up" -> buy YES; "down" -> buy NO (sell YES).
             side = "yes" if decision.side == "up" else "no"

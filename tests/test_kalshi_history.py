@@ -115,3 +115,65 @@ def test_resolve_btc_15m_market_falls_back_to_future():
     now = 1767226800.0  # 2026-01-01T00:20:00Z (PAST closed at 00:15, only FUTURE remains)
     m = resolve_btc_15m_market(markets, now_ts=now)
     assert m is not None and m["ticker"] == "KXBTC15M-FUTURE"
+
+
+def test_intra_account_transfer_payload(monkeypatch):
+    """The transfer moves USD (shard 0) -> crypto (shard 2) with centicents."""
+    client = KalshiClient(signer=None, base_url="http://localhost")
+    calls: list[tuple] = []
+
+    async def fake_request(method, path, *, params=None, json_body=None):
+        calls.append((method, path, json_body))
+        return {"transfer_id": "t-1"}
+
+    monkeypatch.setattr(client, "_request", fake_request)
+    asyncio.run(client.intra_account_transfer(amount_centicents=50_000))
+    method, path, body = calls[0]
+    assert method == "POST"
+    assert path == "/portfolio/intra_exchange_instance_transfer"
+    assert body["source"] == "event_contract"
+    assert body["destination"] == "event_contract"
+    assert body["amount"] == 50_000  # $5.00 in centicents
+    assert body["source_exchange_shard"] == 0  # USD
+    assert body["destination_exchange_shard"] == 2  # crypto/BTC
+    assert body["client_transfer_id"]
+
+
+def test_ensure_crypto_balance_converts_when_low(monkeypatch):
+    client = KalshiClient(signer=None, base_url="http://localhost")
+    requests: list[tuple] = []
+
+    async def fake_request(method, path, *, params=None, json_body=None):
+        requests.append((method, path, json_body))
+        if path == "/portfolio/balance":
+            return {"balance_breakdown": [
+                {"balance": "8.70", "exchange_index": 0},
+                {"balance": "0.01", "exchange_index": 2},
+            ]}
+        return {"transfer_id": "t-1"}
+
+    monkeypatch.setattr(client, "_request", fake_request)
+    converted = asyncio.run(client.ensure_crypto_balance(min_dollars=5.0))
+    assert converted is True
+    # First call is the balance read; second is the transfer.
+    assert requests[1][0] == "POST"
+    assert requests[1][1] == "/portfolio/intra_exchange_instance_transfer"
+    # $5.00 - $0.01 = $4.99 -> 49_900 centicents.
+    assert requests[1][2]["amount"] == 49_900
+
+
+def test_ensure_crypto_balance_noop_when_sufficient(monkeypatch):
+    client = KalshiClient(signer=None, base_url="http://localhost")
+    requests: list[tuple] = []
+
+    async def fake_request(method, path, *, params=None, json_body=None):
+        requests.append((method, path, json_body))
+        return {"balance_breakdown": [
+            {"balance": "3.00", "exchange_index": 0},
+            {"balance": "6.00", "exchange_index": 2},
+        ]}
+
+    monkeypatch.setattr(client, "_request", fake_request)
+    converted = asyncio.run(client.ensure_crypto_balance(min_dollars=5.0))
+    assert converted is False
+    assert len(requests) == 1  # only the balance read, no transfer

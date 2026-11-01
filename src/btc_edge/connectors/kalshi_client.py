@@ -233,6 +233,61 @@ class KalshiClient:
         await self._bucket.acquire(1.0)
         return await self._request("GET", "/portfolio/balance")
 
+    async def intra_account_transfer(
+        self,
+        amount_centicents: int,
+        source_exchange_shard: int = 0,
+        destination_exchange_shard: int = 2,
+    ) -> dict[str, Any]:
+        """Move balance between exchange shards within the same account.
+
+        KXBTC15M settles on exchange shard 2 (the crypto/BTC exchange). The API
+        does NOT auto-convert USD the way the web app does, so we explicitly move
+        USD (shard 0) -> crypto (shard 2) before placing orders. ``amount`` is an
+        integer number of centicents (10_000 == $1.00; 100 == $0.01).
+        """
+        import uuid
+
+        body = {
+            "source": "event_contract",
+            "destination": "event_contract",
+            "amount": int(amount_centicents),
+            "client_transfer_id": str(uuid.uuid4()),
+            "source_exchange_shard": int(source_exchange_shard),
+            "destination_exchange_shard": int(destination_exchange_shard),
+            "source_subaccount": 0,
+            "destination_subaccount": 0,
+        }
+        return await self._request(
+            "POST", "/portfolio/intra_exchange_instance_transfer", json_body=body
+        )
+
+    async def ensure_crypto_balance(self, min_dollars: float = 5.0) -> bool:
+        """Top up the crypto (shard 2) balance from USD (shard 0) if it is low.
+
+        Returns True when a USD -> crypto conversion was submitted, False when the
+        crypto balance was already sufficient (or there was no USD to move).
+        """
+        bal = await self.get_balance()
+        usd = 0.0
+        crypto = 0.0
+        for b in bal.get("balance_breakdown", []) or []:
+            idx = b.get("exchange_index")
+            amt = float(b.get("balance") or 0.0)
+            if idx == 0:
+                usd = amt
+            elif idx == 2:
+                crypto = amt
+        if crypto >= min_dollars:
+            return False
+        need = min_dollars - crypto
+        move = min(need, max(0.0, usd - 0.10))
+        if move <= 0.0:
+            return False
+        # ``amount`` is centicents: dollars * 10_000.
+        await self.intra_account_transfer(amount_centicents=int(round(move * 10_000.0)))
+        return True
+
     async def get_markets(self, ticker: str | None = None, status: str | None = None) -> dict[str, Any]:
         params: dict[str, Any] = {}
         if ticker:
