@@ -48,6 +48,9 @@ class MarketResolution:
     outcomes: list[str]
     outcome_prices: list[float]
     open_reference_price: float | None = None
+    resolution_source: str = ""
+    end_date: str = ""
+    question: str = ""
 
     @property
     def up_token_id(self) -> str:
@@ -93,7 +96,7 @@ class GammaClient:
                 if not condition_id:
                     continue
 
-                token_ids = _parse_json_list(clob_tokens)
+                token_ids = [_to_hex_token_id(t) for t in _parse_json_list(clob_tokens)]
                 outcomes = _parse_json_list(outcomes_raw)
                 prices = [float(p) for p in _parse_json_list(prices_raw)]
 
@@ -111,8 +114,33 @@ class GammaClient:
                     outcomes=[str(o) for o in outcomes],
                     outcome_prices=prices,
                     open_reference_price=open_ref,
+                    resolution_source=str(market.get("resolutionSource") or ""),
+                    end_date=str(market.get("endDate") or market.get("end_date") or ""),
+                    question=str(market.get("question") or ""),
                 )
         return None
+
+
+def _to_hex_token_id(value: str) -> str:
+    """Normalize a Polymarket token id to a 0x-prefixed 64-hex string.
+
+    Gamma's ``clobTokenIds`` arrives as JSON-encoded *decimal* strings; the CLOB
+    order/websocket layers expect 256-bit hex ids. Values already hex-prefixed
+    (``0x…``) pass through unchanged.
+    """
+    v = str(value).strip()
+    if v.startswith("0x") or v.startswith("0X"):
+        return v
+    if not v:
+        return ""
+    try:
+        return "0x" + format(int(v, 10), "064x")
+    except ValueError:
+        # Not decimal; try hex, otherwise return the raw string untouched.
+        try:
+            return "0x" + format(int(v, 16), "064x")
+        except ValueError:
+            return v
 
 
 def _parse_json_list(value) -> list[str]:
@@ -332,6 +360,75 @@ class PolymarketUSClient:
         except Exception as exc:  # noqa: BLE001 - market reads are best-effort
             logger.debug("Polymarket US bbo unavailable: %s", exc)
         return out
+
+    def resolve_15m_full(self, now_ts: float | None = None) -> dict[str, Any]:
+        """Resolve the current 15m market with full metadata + live BBO.
+
+        Combines Gamma discovery (``btc-updown-15m-{epoch}`` slug → condition id,
+        token ids, outcome prices, settlement reference) with the live BBO so the
+        feed always has a non-null up/down probability. ``prob_up`` prefers the
+        live BBO mid and falls back through ask/bid to Gamma's outcome prices, so
+        the feed never goes dark when the book is thin or the market has expired.
+        """
+        now = now_ts if now_ts is not None else time.time()
+        window_ts = compute_window_ts(now, 900)
+        gamma_slug = slug_for(900, window_ts)
+
+        resolution = GammaClient().resolve_market(gamma_slug, 900, window_ts)
+        bbo = self.resolve_15m(now_ts)
+        et_slug = bbo.get("slug") or gamma_slug
+
+        up_price: float | None = None
+        down_price: float | None = None
+        token_ids: list[str] = []
+        condition_id = ""
+        outcomes: list[str] = []
+        end_date = ""
+        reference_source = ""
+        question = ""
+        if resolution is not None:
+            condition_id = resolution.condition_id
+            token_ids = resolution.token_ids
+            outcomes = resolution.outcomes
+            end_date = resolution.end_date
+            reference_source = resolution.resolution_source
+            question = resolution.question
+            if len(resolution.outcome_prices) >= 2:
+                up_price = resolution.outcome_prices[0]
+                down_price = resolution.outcome_prices[1]
+            elif resolution.outcome_prices:
+                up_price = resolution.outcome_prices[0]
+
+        # Gamma outcome prices are the authoritative, always-current market
+        # probability. The BBO currentPx can be stale (it reports the expired
+        # window's settled price right at rollover), so prefer Gamma and fall
+        # back through the live book only when Gamma is unavailable.
+        prob_up = up_price
+        if prob_up is None:
+            prob_up = bbo.get("mid")
+        if prob_up is None:
+            prob_up = bbo.get("ask")
+        if prob_up is None:
+            prob_up = bbo.get("bid")
+
+        return {
+            "slug": et_slug,
+            "gamma_slug": gamma_slug,
+            "condition_id": condition_id,
+            "up_token_id": token_ids[0] if token_ids else "",
+            "down_token_id": token_ids[1] if len(token_ids) > 1 else "",
+            "outcomes": outcomes,
+            "up": up_price,
+            "down": down_price,
+            "prob_up": prob_up,
+            "bid": bbo.get("bid"),
+            "ask": bbo.get("ask"),
+            "mid": bbo.get("mid"),
+            "open_strike": None,
+            "reference_source": reference_source,
+            "end_date": end_date,
+            "question": question,
+        }
 
     async def get_bbo(self, now_ts: float | None = None) -> dict[str, Any]:
         return await asyncio.to_thread(self.resolve_15m, now_ts)

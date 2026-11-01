@@ -164,3 +164,52 @@ def test_parse_json_list():
     assert _parse_json_list('["1", "2"]') == ["1", "2"]
     assert _parse_json_list(["1", "2"]) == ["1", "2"]
     assert _parse_json_list(None) == []
+
+
+def test_to_hex_token_id():
+    from btc_edge.connectors.poly_client import _to_hex_token_id
+
+    dec = "199953880470488117229360737731391276089952954818769217407153549055696685812"
+    hx = _to_hex_token_id(dec)
+    assert hx.startswith("0x")
+    assert len(hx) == 66  # 0x + 64 hex chars
+    assert int(hx, 16) == int(dec)
+    # already-hex and empty pass through
+    assert _to_hex_token_id("0xabc") == "0xabc"
+    assert _to_hex_token_id("") == ""
+
+
+def test_resolve_market_extracts_tokens_and_reference():
+    from btc_edge.connectors.poly_client import GammaClient
+
+    dec_up = "19280415597419133848948530694569527170036591787642937419449001019633188405258"
+    dec_down = "7409129072162577214573017420160737919475118396881107072651415705277073817048"
+
+    class FakeGamma(GammaClient):
+        def get_events(self, slug):
+            return [{
+                "markets": [{
+                    "conditionId": "0xabc123",
+                    "clobTokenIds": f'["{dec_up}", "{dec_down}"]',
+                    "outcomes": '["Up", "Down"]',
+                    "outcomePrices": '["0.695", "0.305"]',
+                    "resolutionSource": "https://data.chain.link/streams/btc-usd-twap-60s-streams",
+                    "endDate": "2026-11-01T09:00:00Z",
+                    "question": "Bitcoin Up or Down",
+                }]
+            }]
+
+    res = FakeGamma().resolve_market("btc-updown-15m-1793522700", 900, 1793522700)
+    assert res is not None
+    assert res.condition_id == "0xabc123"
+    assert len(res.token_ids) == 2
+    assert res.token_ids[0].startswith("0x") and len(res.token_ids[0]) == 66
+    assert res.token_ids[1].startswith("0x") and len(res.token_ids[1]) == 66
+    assert int(res.token_ids[0], 16) == int(dec_up)
+    assert res.outcomes == ["Up", "Down"]
+    assert res.outcome_prices == [0.695, 0.305]
+    assert res.resolution_source == "https://data.chain.link/streams/btc-usd-twap-60s-streams"
+    assert res.end_date == "2026-11-01T09:00:00Z"
+    assert res.question == "Bitcoin Up or Down"
+    assert res.up_token_id == res.token_ids[0]
+    assert res.down_token_id == res.token_ids[1]

@@ -79,26 +79,34 @@ class LiveMarketFeed:
     def fetch_polymarket(self) -> dict[str, dict[str, Any]]:
         from btc_edge.connectors.poly_client import PolymarketUSClient
 
-        # Polymarket US (polymarket.us) publishes public BBOs with no auth; only a
-        # 15-minute BTC up/down market exists (no 5m/10m like polymarket.com).
+        # Polymarket US publishes a single 15-minute BTC up/down market. Resolve
+        # full metadata (condition id, token ids, outcome prices, settlement
+        # reference) from Gamma and merge the live BBO so ``prob_up`` is never
+        # None — the feed no longer goes dark when the book is thin or expired.
         client = PolymarketUSClient()
         out: dict[str, dict[str, Any]] = {}
-        res = client.resolve_15m()
-        bid = res.get("bid")
-        ask = res.get("ask")
-        mid = res.get("mid")
-        prob_up = mid if mid is not None else (ask if ask is not None else bid)
+        res = client.resolve_15m_full()
+        prob_up = res.get("prob_up")
         if prob_up is None:
             return out
-        slug = res.get("slug", "")
+        up = res.get("up")
+        down = res.get("down")
+        if up is None:
+            up = prob_up
+        if down is None:
+            down = 1.0 - prob_up
         out["15m"] = {
-            "up": prob_up,
-            "down": 1.0 - prob_up,
+            "up": up,
+            "down": down,
             "prob_up": prob_up,
-            "open_strike": None,
-            "slug": slug,
-            "up_token_id": slug,
-            "down_token_id": slug,
+            "open_strike": res.get("open_strike"),
+            "slug": res.get("slug", ""),
+            "gamma_slug": res.get("gamma_slug", ""),
+            "condition_id": res.get("condition_id", ""),
+            "up_token_id": res.get("up_token_id", ""),
+            "down_token_id": res.get("down_token_id", ""),
+            "reference_source": res.get("reference_source", ""),
+            "end_date": res.get("end_date", ""),
         }
         return out
 
