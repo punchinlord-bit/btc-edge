@@ -7,7 +7,6 @@
   <link rel="icon" type="image/png" href="/static/favicon.png" />
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-  <script src="https://unpkg.com/lightweight-charts@5.0.3/dist/lightweight-charts.standalone.production.js"></script>
   <style>
     :root {
       --bg: #070a12;
@@ -113,29 +112,6 @@
     </div>
   </section>
 
-
-  <section class="card mb-6">
-    <div class="flex items-center justify-between mb-2">
-      <div class="widget-title" style="margin-bottom:0"><span>🚀</span> 15m Rocket — Price vs Strike</div>
-      <span id="rocket-timer" class="pill bg-gray-800 font-mono text-amber-400">--:--</span>
-    </div>
-    <div id="rocket-chart" class="relative w-full" style="height:240px;"></div>
-    <div class="text-xs text-gray-400 mt-2">
-      Strike <b id="rocket-strike" class="text-gray-200">--</b>
-      · Model P(up) <b id="rocket-prob" class="text-cyan-300">--</b>
-      · <span id="rocket-delta" class="font-mono">--</span>
-    </div>
-  </section>
-
-  <section class="card mb-6">
-    <div class="flex items-center justify-between mb-2">
-      <div class="widget-title" style="margin-bottom:0"><span>🏆</span> Champion vs Challenger Gate <span class="pill bg-emerald-900/60 text-emerald-300" style="margin:0 0 0 0.5rem">AUTO</span></div>
-      <button id="gate-eval-btn" class="px-4 py-1 rounded-lg bg-blue-700 hover:bg-blue-600 text-white text-sm font-semibold">Run Now</button>
-    </div>
-    <div class="text-xs text-gray-400 mb-2">Champion <b id="gate-champion" class="text-gray-200">none</b> · OOS windows <b id="gate-oos" class="text-gray-200">0</b></div>
-    <div id="gate-checks" class="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs"></div>
-    <div id="gate-verdict" class="text-xs text-gray-500 mt-2">Runs automatically every 15-min window — a new model must beat the champion on all 5 checks before it's promoted. No action needed.</div>
-  </section>
 
   <section class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
     <div class="card">
@@ -651,13 +627,8 @@
     initChart();
     initPriceChart();
     initProbChart();
-    initRocketChart();
-    updateRocketTimer();
     poll();
-    pollGate();
     setInterval(poll, 1000);
-    setInterval(updateRocketTimer, 1000);
-    setInterval(pollGate, 5000);
   </script>
 
   <section class="card mb-6">
