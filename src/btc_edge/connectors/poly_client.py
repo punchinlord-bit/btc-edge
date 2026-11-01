@@ -452,16 +452,28 @@ class PolymarketUSClient:
             "tif": tif,
         }
         resp = self.client.orders.create(params)
-        # Polymarket returns HTTP 200 even for REJECTED orders — the rejection is
-        # reported in ``executions[].type == EXECUTION_TYPE_REJECTED`` with an
-        # ``orderRejectReason``. Surface it as an error so the trading loop does
-        # not record a phantom "fill" (and Telegram alert) for an order that was
-        # never accepted on the venue.
+        # Polymarket returns HTTP 200 even for orders it does NOT accept — the
+        # terminal state lives in ``executions[].type``. Surface any terminal
+        # non-fill state (REJECTED / CANCELED / EXPIRED / DONE_FOR_DAY) as an
+        # error so the trading loop does not record a phantom "fill" (and Telegram
+        # alert) for an order that never landed on the venue.
         executions = resp.get("executions") if isinstance(resp, dict) else []
+        terminal_fail = {
+            "EXECUTION_TYPE_REJECTED",
+            "EXECUTION_TYPE_CANCELED",
+            "EXECUTION_TYPE_EXPIRED",
+            "EXECUTION_TYPE_DONE_FOR_DAY",
+        }
         for ex in executions or []:
-            if ex.get("type") == "EXECUTION_TYPE_REJECTED":
-                reason = ex.get("orderRejectReason") or ex.get("text") or "unknown"
-                raise RuntimeError(f"Polymarket order rejected: {reason}")
+            ex_type = ex.get("type")
+            if ex_type in terminal_fail:
+                reason = ex.get("orderRejectReason") or ex.get("text") or ex_type
+                raise RuntimeError(f"Polymarket order not accepted ({ex_type}): {reason}")
+        states = [ex.get("type") for ex in (executions or [])] or ["(resting)"]
+        logger.info(
+            "Polymarket order submitted: %s %s %s qty=%d px=%.2f -> %s",
+            action, side, slug, quantity, px, states,
+        )
         return resp
 
     async def place_order(
