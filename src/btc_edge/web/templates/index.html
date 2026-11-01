@@ -594,11 +594,21 @@
 
     async function poll() {
       try {
-        const [m, o, st] = await Promise.all([
-          fetch('/api/metrics', { headers: apiHeaders() }).then(r => r.json()),
-          fetch('/api/overview', { headers: apiHeaders() }).then(r => r.json()),
-          fetch('/api/status', { headers: apiHeaders() }).then(r => r.json()),
+        const rs = await Promise.all([
+          fetch('/api/metrics', { headers: apiHeaders() }),
+          fetch('/api/overview', { headers: apiHeaders() }),
+          fetch('/api/status', { headers: apiHeaders() }),
         ]);
+        // A stale/wrong cached API key returns 401; re-prompt instead of showing
+        // a silently-empty dashboard.
+        if (rs.some(r => r.status === 401)) {
+          localStorage.removeItem('btcApiKey');
+          apiKey = '';
+          const k = prompt('Dashboard API key rejected. Enter DASHBOARD_API_KEY:');
+          if (k) { apiKey = k.trim(); localStorage.setItem('btcApiKey', apiKey); }
+          return;
+        }
+        const [m, o, st] = await Promise.all(rs.map(r => r.json()));
         render(Object.assign({}, m, o, st));
       } catch (e) { /* ignore */ }
     }
