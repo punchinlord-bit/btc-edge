@@ -75,16 +75,8 @@ canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
     <div id="flash"></div>
     <div id="toast"></div>
   </div>
-  <div class="bar">
-    <div class="chips"><span style="color:var(--mu)">Past</span><span id="past">&mdash;</span></div>
-    <div class="rng" id="rng"><button class="on" data-v="live">Live</button><button data-v="5">5M</button><button data-v="15">15M</button></div>
-  </div>
   <div class="pbar"><i id="pfill"></i></div>
-  <div class="btns">
-    <button id="up">Up <span id="upc">50</span>&cent;</button>
-    <button id="dn">Down <span id="dnc">50</span>&cent;</button>
-  </div>
-  <div class="foot"><span>Ours <b id="ours" style="color:var(--c)">--</b></span><span>Mkt <b id="mkt">--</b></span><span>Lead <b id="lead">--</b></span></div>
+  <div class="foot"><span>Up <b id="upc">--</b></span><span>Down <b id="dnc">--</b></span></div>
 
   <details class="card" style="display:none">
     <summary class="ch"><div><strong>Champion vs Challenger Gate</strong><small id="gsrc">Internal (auto, tap to expand)</small></div></summary>
@@ -97,11 +89,6 @@ canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
     <div class="gc" style="margin-top:8px"><div>Verdict<span class="bw" id="g-verdict-b">IDLE</span></div><div id="g-verdict">No run yet</div></div>
     <div class="ch" style="margin-top:8px"><div></div><button class="gbtn" id="gbtn">Test Challenger</button></div>
   </details>
-
-  <div class="card">
-    <div class="ch"><div><strong>Operator Execution</strong><small>Locked to active CHAMPION</small></div></div>
-    <div id="ops"></div>
-  </div>
 </div>
 
 <script>
@@ -148,8 +135,6 @@ function rollover(now){
 }
 function updateStatic(){
   $('tgt').textContent=fmt(strike);
-  $('streak').textContent=streak;
-  $('past').innerHTML=results.length?results.map(u=>`<span style="color:${u?G:R}">${u?'▲':'▼'}</span>`).join(' '):'&mdash;';
 }
 const fmt=v=>'$'+v.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
 let tt;function toast(t,c){const e=$('toast');e.textContent=t;e.style.color=c;e.classList.add('on');clearTimeout(tt);tt=setTimeout(()=>e.classList.remove('on'),1800)}
@@ -164,22 +149,7 @@ function model(now){
   return{p:Math.min(.99,Math.max(.01,lp)),rem};
 }
 
-// ---- controls ----
-$('rng').onclick=e=>{
-  const v=e.target.dataset.v;if(!v)return;
-  [...$('rng').children].forEach(b=>b.classList.toggle('on',b===e.target));
-  if(v==='live'){viewLen=60}else{winLen=viewLen=+v*60;$('wtag').textContent=v+'m';
-    curWs=Math.floor(Date.now()/1000/winLen)*winLen;strike=price;bets=[];updateStatic()}
-};
-function bet(dir){
-  const now=Date.now()/1000,m=model(now);
-  bets.push({t:now,p:price,dir});
-  const c=Math.round((dir==='up'?m.p:1-m.p)*100);
-  toast(`${dir.toUpperCase()} locked @ ${c}¢`,dir==='up'?G:R);shake=.5;
-  for(let i=0;i<18;i++)particles.push({x:W*.76,y:yOf(price),vx:(Math.random()-.5)*5,vy:(dir==='up'?-1:1)*Math.random()*5,l:1,c:dir==='up'?G:R});
-}
-$('up').onclick=()=>bet('up');$('dn').onclick=()=>bet('down');
-
+// ---- controls (removed: bet buttons + range switcher are gone) ----
 const yOf=v=>H*.1+(1-(v-ylo)/(yhi-ylo))*H*.8;
 
 // ---- main loop ----
@@ -219,14 +189,7 @@ function frame(nowMs){
   $('arc').style.strokeDashoffset=175.9*(1-m.rem/winLen);
   $('arc').style.stroke=rem<30?R:rem<120?'#f59e0b':C;
   const pc=Math.round(m.p*100);
-  $('upc').textContent=pc;$('dnc').textContent=100-pc;$('pfill').style.width=pc+'%';
-  if(live&&typeof live.modelProbUp==='number')$('ours').textContent=Math.round(live.modelProbUp*100)+'%';
-  if(live&&typeof live.championProbUp==='number')$('mkt').textContent=Math.round(live.championProbUp*100)+'%';
-  if(live&&typeof live.modelProbUp==='number'&&typeof live.championProbUp==='number'){
-    const lead=Math.round((live.modelProbUp-live.championProbUp)*100);
-    const el=$('lead');el.textContent=(lead>=0?'+':'')+lead+'pts';
-    el.style.color=lead>=0?G:R;
-  }
+  $('upc').textContent=pc+'%';$('dnc').textContent=(100-pc)+'%';$('pfill').style.width=pc+'%';
 
   // side cross shockwave
   if(up!==lastSide){rings.push({x:W*.76,y:yOf(price),r:6,l:1,c:col});lastSide=up;shake=Math.max(shake,.6)}
@@ -352,12 +315,7 @@ $('gbtn').onclick=async()=>{
   catch(e){renderGate(demoGate())}
   $('gbtn').textContent='Test Challenger';
 };
-function renderOps(){
-  $('ops').innerHTML=opsData.map(o=>{const ready=o.kalshiReady||o.polymarketReady;
-    return `<div class="op"><div><b>${o.label}</b><small>Kalshi ${o.kalshiReady?'●':'○'}  Polymarket ${o.polymarketReady?'●':'○'}  · signal <span style="color:${o.signal==='UP'?G:R}">${o.signal}</span></small></div><button class="tg ${o.armed?'on':''}" data-id="${o.id}" ${ready?'':'disabled'}>${o.armed?'ARMED':'OFF'}</button></div>`}).join('');
-}
-$('ops').onclick=async e=>{const id=e.target.dataset&&e.target.dataset.id;if(!id)return;const o=opsData.find(x=>x.id===id);o.armed=!o.armed;renderOps();
-  if(connected)fetch(API+`/operators/${id}/arm`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({armed:o.armed})}).catch(()=>{})};
+function renderOps(){} /* removed: operator card gone */
 async function poll(){
   try{const r=await fetch(API+'/telemetry?venue='+VENUE,{headers:AUTH()});if(!r.ok)throw 0;const t=await r.json();connected=true;live=t;
     $('gsrc').textContent='Live from backend · '+(t.championVersionId||'no champion');
