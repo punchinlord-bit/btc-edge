@@ -86,25 +86,26 @@ def test_router_paper_mode_no_live():
     assert order.status == "filled"
 
 
-def test_size_for_does_not_force_min_past_cap():
-    """A tiny wallet must NOT be forced into the 5-share Polymarket minimum when
-    that would exceed the per-trade cap (the '90% of the wallet' bug)."""
+def test_size_for_allows_min_up_to_third_of_account():
+    """The 5-share Polymarket minimum is allowed as long as its notional stays
+    within ~35% of the account, so small accounts keep trading without a single
+    order betting the whole balance."""
     s = load_settings()
     router = Router(s)
+
+    # $7 account, 35% = $2.45; 5 shares @ 0.48 = $2.40 <= $2.45 -> allowed.
     d = StrategyDecision(
         strategy="market_maker", side="up", action="buy", price=0.48, size=5.0,
         order_type="taker", reason="test", prob_estimate=0.55, ev_estimate=0.05,
     )
-    # $7 bankroll, 1% Polymarket cap = $0.07; 5 shares @ 0.48 = $2.40 > $0.07.
-    assert router.size_for(d, venue="polymarket", bankroll=7.0) == 0.0
+    assert router.size_for(d, venue="polymarket", bankroll=7.0) == 5.0
 
-    # A large enough bankroll trades normally (Quarter-Kelly, capped) — the
-    # resulting size clears the 5-share minimum without forcing it.
+    # 5 shares @ 0.90 = $4.50 > $2.45 -> skip (would be > 1/3 of the account).
     d2 = StrategyDecision(
-        strategy="market_maker", side="up", action="buy", price=0.48, size=5.0,
-        order_type="taker", reason="test", prob_estimate=0.55, ev_estimate=0.05,
+        strategy="market_maker", side="up", action="buy", price=0.90, size=5.0,
+        order_type="taker", reason="test", prob_estimate=0.95, ev_estimate=0.05,
     )
-    assert router.size_for(d2, venue="polymarket", bankroll=500.0) > 0.0
+    assert router.size_for(d2, venue="polymarket", bankroll=7.0) == 0.0
 
 
 # ------------------------------------------------------------------- safety

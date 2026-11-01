@@ -5,8 +5,8 @@ trading:
   max_daily_loss_pct: 10.0      # circuit breaker: halt if daily loss exceeds this % of bankroll ($2 on $20)
   quarter_kelly_cap_pct: 2.0    # per-trade max risk, capped at 2% of bankroll (small threshold)
   max_exposure_pct: 35.0        # total open notional (per venue) cap, % of live balance — "don't burn the bankroll"
-  polymarket_cap_pct: 1.0       # tighter per-trade cap (5-share min is a big slice of a small account)
-  polymarket_exposure_pct: 20.0 # total Polymarket open notional cap, % of live balance
+  polymarket_cap_pct: 1.0       # tighter per-trade Kelly cap
+  polymarket_exposure_pct: 35.0 # total Polymarket open notional cap, % of live balance
   min_ev_threshold: 0.01        # minimum expected-value edge (net of fees) before firing
   chase_guard_pct: 0.1          # don't buy a side that already moved >0.1% this window (anti-chase)
   entry_warmup_seconds: 60.0    # stay flat for the first 60s of a window (let info develop)
