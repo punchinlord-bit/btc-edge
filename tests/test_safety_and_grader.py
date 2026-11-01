@@ -49,7 +49,8 @@ def test_kelly_fraction():
 
 def test_quarter_kelly_capped():
     size = quarter_kelly_size(prob=0.6, price=0.5, bankroll=10000.0, cap_pct=10.0)
-    assert size == pytest.approx(500.0, rel=1e-6)
+    # 0.35 * ((0.6 - 0.5) / 0.5) * 10000 = 700, below the 10% cap (1000).
+    assert size == pytest.approx(700.0, rel=1e-6)
 
 
 def test_trading_config_conservative_defaults():

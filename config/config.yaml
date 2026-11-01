@@ -3,7 +3,7 @@ trading:
   base_currency: "USD"
   bankroll: 20.0                # conservative baseline (auto-scales to live balance in live mode)
   max_daily_loss_pct: 10.0      # circuit breaker: halt if daily loss exceeds this % of bankroll ($2 on $20)
-  quarter_kelly_cap_pct: 2.0    # per-trade max risk, capped at 2% of bankroll (small threshold)
+  quarter_kelly_cap_pct: 2.8    # per-trade max risk (Kalshi), ~40% larger; Polymarket uses its own cap
   max_exposure_pct: 35.0        # total open notional (per venue) cap, % of live balance — "don't burn the bankroll"
   polymarket_cap_pct: 1.0       # tighter per-trade Kelly cap
   polymarket_exposure_pct: 35.0 # total Polymarket open notional cap, % of live balance

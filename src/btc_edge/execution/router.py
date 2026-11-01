@@ -54,8 +54,8 @@ def kelly_fraction(prob: float, price: float) -> float:
 
 
 def quarter_kelly_size(prob: float, price: float, bankroll: float, cap_pct: float = 10.0) -> float:
-    """Dollar size for a Quarter-Kelly position capped at ``cap_pct``% of bankroll."""
-    fraction = 0.25 * kelly_fraction(prob, price)
+    """Dollar size for a fractional-Kelly position capped at ``cap_pct``% of bankroll."""
+    fraction = 0.35 * kelly_fraction(prob, price)
     if fraction <= 0:
         return 0.0
     dollar_size = fraction * bankroll
