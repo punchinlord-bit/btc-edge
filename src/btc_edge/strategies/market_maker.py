@@ -57,25 +57,33 @@ class MarketMakerStrategy(Strategy):
 
         self._last_quote_ts[venue] = time.time()
 
-        # Buy the YES side. On Kalshi we must be a TAKER (buy at the ask, IOC) —
-        # maker/GTC orders rest on the book and need USDC margin, which returns
-        # `insufficient_balance`; taker orders fill immediately and pay in USD.
+        # Buy the side the model actually predicts — NOT always "up". On Kalshi we
+        # must be a TAKER (buy at the ask, IOC): maker/GTC orders rest on the book
+        # and need USDC margin (``insufficient_balance``); taker fills pay in USD.
         # Polymarket US supports resting maker orders on both legs, so keep those.
         fair = ctx.contract_price
+        prob_up = ctx.prob_estimate
+        direction = "up" if prob_up >= 0.5 else "down"
         decisions: list[StrategyDecision] = []
         for lvl in range(self.levels):
             if venue == "kalshi":
-                buy_price = min(0.99, round(fair + (lvl + 1) * (spread / 2.0), 2))
+                if direction == "up":
+                    buy_price = min(0.99, round(fair + (lvl + 1) * (spread / 2.0), 2))
+                    prob = prob_up
+                else:
+                    # Long down = buy the NO leg. NO price ≈ 1 - YES bid.
+                    buy_price = min(0.99, round((1.0 - fair) + (lvl + 1) * (spread / 2.0), 2))
+                    prob = 1.0 - prob_up
                 decisions.append(StrategyDecision(
                     strategy=self.name,
-                    side="up",
+                    side=direction,
                     action="buy",
                     price=buy_price,
                     size=5.0,
                     order_type="taker",
-                    reason=f"taker buy level {lvl + 1}",
-                    prob_estimate=fair,
-                    ev_estimate=fair - buy_price,
+                    reason=f"taker buy {direction} level {lvl + 1}",
+                    prob_estimate=prob,
+                    ev_estimate=prob - buy_price,
                     rule_snapshot=snapshot,
                 ))
             else:
