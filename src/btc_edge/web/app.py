@@ -24,14 +24,14 @@ app = FastAPI(title="BTC-Edge Dashboard")
 
 @app.middleware("http")
 async def _no_cache_assets(request: Request, call_next):
-    """Never let the browser serve a stale dashboard/chart HTML (this has bitten us
-    repeatedly — users see the old panel after a deploy)."""
+    """Never let the browser serve a stale dashboard/chart/API payload (this has
+    bitten us repeatedly — users see the old panel after a deploy). No-cache
+    EVERYTHING, not just HTML, so the iframe rockets and their telemetry JSON
+    always revalidate."""
     response = await call_next(request)
-    ctype = response.headers.get("content-type", "")
-    if ctype.startswith("text/html"):
-        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-        response.headers["Pragma"] = "no-cache"
-        response.headers["Expires"] = "0"
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
     return response
 
 
