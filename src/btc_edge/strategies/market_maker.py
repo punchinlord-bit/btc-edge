@@ -57,16 +57,15 @@ class MarketMakerStrategy(Strategy):
 
         self._last_quote_ts[venue] = time.time()
 
-        # Buy the side the model predicts. On Kalshi we can only go LONG YES (the
-        # down leg would need USDC margin the account doesn't hold), so when the
-        # model says "down" we simply stand aside instead of chasing up or trying
-        # a margin order. Polymarket US supports resting maker orders on both legs.
+        # Buy the side the model predicts. When the model says "down" we stand
+        # aside entirely — never buy "up" into a falling market, and we can't short
+        # without margin/inventory. This prevents wrong-direction bets.
         fair = ctx.contract_price
         prob_up = ctx.prob_estimate
         direction = "up" if prob_up >= 0.5 else "down"
         decisions: list[StrategyDecision] = []
-        if venue == "kalshi" and direction != "up":
-            return decisions  # can't go short/down without margin — stand aside
+        if direction != "up":
+            return decisions  # model says "down" — stand aside, don't bet against it
         for lvl in range(self.levels):
             if venue == "kalshi":
                 buy_price = min(0.99, round(fair + (lvl + 1) * (spread / 2.0), 2))
@@ -94,19 +93,6 @@ class MarketMakerStrategy(Strategy):
                     reason=f"bid level {lvl + 1}",
                     prob_estimate=fair,
                     ev_estimate=fair - bid_price,
-                    rule_snapshot=snapshot,
-                ))
-                ask_price = min(0.99, round(fair + (lvl + 1) * (spread / 2.0), 2))
-                decisions.append(StrategyDecision(
-                    strategy=self.name,
-                    side="up",
-                    action="sell",
-                    price=ask_price,
-                    size=5.0,
-                    order_type="maker",
-                    reason=f"ask level {lvl + 1}",
-                    prob_estimate=fair,
-                    ev_estimate=ask_price - fair,
                     rule_snapshot=snapshot,
                 ))
         return decisions

@@ -63,10 +63,16 @@ def test_late_scalp_fires_regardless_of_regime():
 
 def test_market_maker_quotes_three_levels():
     strat = MarketMakerStrategy()
-    ctx = make_context(time_remaining=200.0, contract_price=0.50, regime="DAMPENING")
+    ctx = make_context(time_remaining=200.0, contract_price=0.50, regime="DAMPENING", prob_estimate=0.60)
     decisions = strat.evaluate(ctx)
-    assert len(decisions) == 6  # 3 bids + 3 asks (polymarket supports both legs)
-    assert all(d.order_type == "maker" for d in decisions)
+    assert len(decisions) == 3  # 3 buy bids on the predicted "up" side (no asks/shorts)
+    assert all(d.order_type == "maker" and d.action == "buy" for d in decisions)
+
+
+def test_market_maker_stands_aside_on_down():
+    strat = MarketMakerStrategy()
+    ctx = make_context(time_remaining=200.0, contract_price=0.50, regime="DAMPENING", prob_estimate=0.40)
+    assert strat.evaluate(ctx) == []
 
 
 def test_market_maker_kalshi_buy_only():
