@@ -620,11 +620,10 @@ class TradingLoop:
         if last_ctx is not None:
             self._update_state(last_ctx, all_decisions)
 
-        # Safety: bridge the watchdog to the shared dashboard kill switch.
+        # The kill switch is USER-ONLY: nothing in the engine may auto-halt. The
+        # daily-loss circuit breaker is intentionally disabled so the bot never
+        # stops itself — halting is always a deliberate dashboard action.
         self.safety.state.kill_switch = self.state.kill_switch
-        if self.safety.daily_loss_limit_breached():
-            self.state.kill_switch = True
-            self.safety.trigger_kill_switch()
 
     def _append_trade_log(self, record: dict[str, Any]) -> None:
         """Append one signal/settlement record to ``data/trades.jsonl`` (best-effort).
