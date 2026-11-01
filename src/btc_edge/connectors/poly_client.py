@@ -288,14 +288,13 @@ def btc_updown_15m_slug(now_ts: float | None = None) -> str:
 
     Polymarket US (polymarket.us) lists short-horizon BTC up/down markets with
     slugs of the form ``cpc-btc-updown-15m-{YYYY-MM-DD-HHMM}z`` where the timestamp
-    is the **Eastern Time** window open floored to the 15-minute boundary (the "z"
-    suffix is cosmetic — the wall clock is US/Eastern, not UTC).
+    is the **UTC** window open floored to the 15-minute boundary (the "z" suffix is
+    real UTC — verified against the live market: the ET-relative slug resolves to a
+    *closed* market, the UTC slug to the *open* one).
     """
-    from datetime import datetime
-    from zoneinfo import ZoneInfo
+    from datetime import UTC, datetime
 
-    et = ZoneInfo("America/New_York")
-    now = datetime.now(et) if now_ts is None else datetime.fromtimestamp(now_ts, et)
+    now = datetime.fromtimestamp(now_ts, UTC) if now_ts is not None else datetime.now(UTC)
     window = now.replace(minute=(now.minute // 15) * 15, second=0, microsecond=0)
     return f"cpc-btc-updown-15m-{window.strftime('%Y-%m-%d-%H%M')}z"
 
