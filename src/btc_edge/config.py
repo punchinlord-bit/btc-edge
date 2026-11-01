@@ -52,6 +52,9 @@ class TradingConfig(BaseModel):
     chase_guard_pct: float = 0.1
     # Seconds at the start of a window to stay flat (let information develop).
     entry_warmup_seconds: float = 60.0
+    # Auto-sell (take profit) when a position's mark-to-market gain reaches this
+    # percent above entry, then let the strategies re-enter if there's still edge.
+    take_profit_pct: float = 85.0
 
     @field_validator(
         "bankroll",

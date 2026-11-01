@@ -548,6 +548,39 @@ class TradingLoop:
             rule_snapshot={},
         ))
 
+    def _take_profit(self, ctx: MarketContext, venue: str, tf: int, decisions: list[Any]) -> None:
+        """Close a position that is up >= take_profit_pct% and free capital to re-enter.
+
+        Marks each open buy to market (up -> contract_price, down -> 1 - contract_price);
+        once the gain vs entry exceeds the threshold we emit a sell-to-close and drop
+        the position so the strategies can re-enter if there is still edge.
+        """
+        threshold = 1.0 + self.settings.trading.take_profit_pct / 100.0
+        mark_up = ctx.contract_price
+        for pos in list(self._open):
+            if pos.get("venue") != venue or pos.get("tf") != tf:
+                continue
+            if pos.get("action") != "buy" or pos.get("price", 0.0) <= 0:
+                continue
+            mark = mark_up if pos["side"] == "up" else (1.0 - mark_up)
+            if mark / pos["price"] < threshold:
+                continue
+            from btc_edge.strategies.base import StrategyDecision
+
+            decisions.append(StrategyDecision(
+                strategy="take_profit",
+                side=pos["side"],
+                action="sell",
+                price=mark,
+                size=pos["size"],
+                order_type="taker",
+                reason=f"take profit {round((mark / pos['price'] - 1.0) * 100.0)}%",
+                prob_estimate=ctx.prob_estimate,
+                ev_estimate=0.0,
+                rule_snapshot={},
+            ))
+            self._open.remove(pos)
+
     async def tick(self) -> None:
         if self.state.btc_price is None:
             return
@@ -577,6 +610,7 @@ class TradingLoop:
                     decisions.extend(strat.evaluate(ctx))
                 except Exception as exc:  # noqa: BLE001
                     logger.debug("%s evaluate error: %s", strat.name, exc)
+            self._take_profit(ctx, venue, tf, decisions)
             self._flip_reversals(ctx, venue, decisions)
             decisions = self._filter_entries(decisions, ctx, tf)
             if decisions and not self.state.kill_switch:

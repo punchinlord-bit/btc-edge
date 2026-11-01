@@ -100,6 +100,11 @@ class Router:
         """
         br = bankroll if (bankroll is not None and bankroll > 0) else self.settings.trading.bankroll
         v = venue or _venue(decision, self.settings)
+        # Closing (sell) decisions — e.g. take-profit — carry their own position
+        # size and must not be re-sized by Quarter-Kelly (the entry-edge logic below
+        # only applies to opening buys).
+        if decision.action == "sell":
+            return max(0.0, decision.size)
         # Polymarket gets a tighter per-trade cap: it is more volatile and its
         # 5-share minimum is a bigger slice of a small account than Kalshi's
         # 1-contract minimum.
