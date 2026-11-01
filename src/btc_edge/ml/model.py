@@ -115,14 +115,32 @@ class LightGBMEnsemble:
 
 
 class ProbabilityEnsemble:
-    """Combined logistic + LightGBM probability estimator."""
+    """Combined logistic + LightGBM probability estimator.
 
-    def __init__(self, lgbm_weight: float = 0.4) -> None:
+    Produces a raw ``prob_estimate`` and an *adaptive* market calibration: the
+    raw estimate is shrunk toward the market's implied probability by a weight
+    derived from the model's Brier score versus the market's Brier score, so an
+    overconfident/unskilled model defers to the market while a genuinely
+    predictive model keeps more weight.
+    """
+
+    def __init__(
+        self,
+        lgbm_weight: float = 0.4,
+        min_shrink: float = 0.3,
+        max_shrink: float = 0.9,
+    ) -> None:
         self.logreg = OnlineLogisticRegression()
         self.lgbm = LightGBMEnsemble()
         self.lgbm_weight = lgbm_weight
+        self.min_shrink = min_shrink
+        self.max_shrink = max_shrink
         self._history_X: list[np.ndarray] = []
         self._history_y: list[int] = []
+        # Calibration tracking: the model's prediction and the market's implied
+        # probability at each resolved window (aligned with ``_history_y``).
+        self._hist_pred: list[float] = []
+        self._hist_market: list[float] = []
 
     def predict(self, features: dict[str, float], timeframe_seconds: int = 300) -> float:
         x = feature_vector(features, timeframe_seconds).reshape(1, -1)
@@ -145,9 +163,48 @@ class ProbabilityEnsemble:
         """Online-update the logistic regressor and accumulate history for LGBM."""
         x = feature_vector(features, timeframe_seconds)
         y = 1 if outcome >= 0.5 else 0
+        # Record the pre-update prediction and the market's implied probability
+        # (from ``contract_price``) so the calibrator can score the model against
+        # the market on this resolved window.
+        pred = float(self.predict(features, timeframe_seconds))
+        market = float(np.clip(float(features.get("contract_price", 0.5)), 0.01, 0.99))
+        self._hist_pred.append(pred)
+        self._hist_market.append(market)
         self.logreg.partial_fit(x.reshape(1, -1), np.array([y]))
         self._history_X.append(x)
         self._history_y.append(y)
+
+    def shrinkage_weight(self) -> float:
+        """Fraction of weight to give the market when combining probabilities.
+
+        Compares the model's Brier score against the market's Brier score over the
+        accumulated history. With little history (or a market that scores near
+        zero) the model is unproven, so we default to ``max_shrink`` (heavy market
+        weight). A model that demonstrably beats the market earns a lower weight,
+        down to ``min_shrink``.
+        """
+        n = len(self._history_y)
+        if n < 2:
+            return self.max_shrink
+
+        model_brier = sum((p - y) ** 2 for p, y in zip(self._hist_pred, self._history_y, strict=True)) / n
+        market_brier = sum((m - y) ** 2 for m, y in zip(self._hist_market, self._history_y, strict=True)) / n
+        if market_brier <= 1e-9:
+            return self.max_shrink
+
+        # Fractional Brier improvement of the model over the market, clamped to
+        # [0, 1] (a model worse than the market earns zero skill).
+        skill = max(0.0, min(1.0, 1.0 - model_brier / market_brier))
+        # Shrink the noisy skill estimate toward 0 (no skill) proportional to the
+        # number of observed samples (a weak Bayesian prior).
+        prior_strength = 20.0
+        skill = skill * n / (n + prior_strength)
+        return self.max_shrink - skill * (self.max_shrink - self.min_shrink)
+
+    def calibrate(self, raw_prob: float, market_prob: float) -> float:
+        """Shrink ``raw_prob`` toward ``market_prob`` by the adaptive weight."""
+        w = self.shrinkage_weight()
+        return float(np.clip((1.0 - w) * raw_prob + w * market_prob, 0.01, 0.99))
 
     def retrain_lgbm(self) -> None:
         if len(self._history_X) >= 4:

@@ -361,13 +361,12 @@ class TradingLoop:
             "regime_amplifying": 1.0 if regime_str == "AMPLIFYING" else 0.0,
         }
         prob = self._ensembles[(tf, venue)].predict(feats, tf)
-        # Calibration: the online ensemble overfits small samples and is
-        # overconfident (it pins ~60% "up" while BTC settles ~50/50), so shrink
-        # it toward the market's implied probability. The market is near-efficient
-        # and well-calibrated; the model only earns when it holds a *persistent*
-        # edge that survives the shrinkage.
+        # Adaptive calibration: shrink the (overconfident, small-sample) ensemble
+        # toward the market's implied probability by a weight derived from the
+        # model's Brier score vs the market's. An unskilled model defers to the
+        # market; a model that demonstrably beats it keeps more weight.
         market_prob = max(0.01, min(0.99, contract_price))
-        prob = 0.5 * prob + 0.5 * market_prob
+        prob = self._ensembles[(tf, venue)].calibrate(prob, market_prob)
         # Momentum tilt: lean with BTC's realized move only when it is meaningful.
         # A 15m move below 0.15% (~1 std dev) is noise and gets zero weight; the
         # tilt caps at 30% weight so a single choppy move can't dominate.

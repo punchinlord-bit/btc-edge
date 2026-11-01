@@ -175,6 +175,37 @@ def test_ensemble_fallback_and_learning():
     assert 0.0 <= p <= 1.0
 
 
+def test_calibrate_no_history_defers_to_market():
+    ens = ProbabilityEnsemble()
+    # No resolved windows yet -> the model is unproven -> max market shrinkage.
+    assert ens.shrinkage_weight() == pytest.approx(0.9)
+    out = ens.calibrate(0.6, 0.4)
+    assert out == pytest.approx(0.1 * 0.6 + 0.9 * 0.4)
+
+
+def test_shrinkage_weight_rewards_model_skill():
+    ens = ProbabilityEnsemble()
+    # Seed a resolved history where the model predicts perfectly and the market
+    # is uninformative (always 0.5), so the model earns full skill.
+    ens._hist_pred = [1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0]
+    ens._hist_market = [0.5] * 10
+    ens._history_y = [1, 0, 1, 0, 1, 0, 1, 0, 1, 0]
+    # skill = 1.0, damped by the prior n/(n+20) = 10/30 -> w = max - (1/3)*span.
+    w = ens.shrinkage_weight()
+    assert w < ens.max_shrink
+    assert w == pytest.approx(0.9 - (10.0 / 30.0) * (0.9 - 0.3), abs=0.01)
+
+
+def test_shrinkage_weight_penalizes_worse_model():
+    ens = ProbabilityEnsemble()
+    # Model predicts a coin-flip (Brier 0.25); market predicts 0.7/0.3 (Brier
+    # ~0.09). The model is clearly worse, so it earns zero skill -> max shrinkage.
+    ens._hist_pred = [0.5] * 10
+    ens._hist_market = [0.7, 0.3, 0.7, 0.3, 0.7, 0.3, 0.7, 0.3, 0.7, 0.3]
+    ens._history_y = [1, 0, 1, 0, 1, 0, 1, 0, 1, 0]
+    assert ens.shrinkage_weight() == pytest.approx(0.9)
+
+
 # --------------------------------------------------------------------- db
 
 def test_database_roundtrip(tmp_path):
