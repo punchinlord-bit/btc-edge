@@ -414,7 +414,7 @@ class TradingLoop:
         # balance — sizing against a stale/unknown balance is exactly what let a
         # single cycle bet the whole account.
         live_balance = self.state.wallet_balances.get(venue)
-        if live_balance is None or live_balance < 1.0:
+        if live_balance is None or live_balance <= 0:
             return
         # "Don't burn the bankroll": cap the total open notional for this venue at
         # max_exposure_pct% of the live balance. We track the notional of orders

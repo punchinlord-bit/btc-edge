@@ -128,12 +128,11 @@ class Router:
         size = shares_from_dollars(dollar, price)
         size = fee_models.apply_min_order(v, size)
         if size <= 0:
-            # With a small bankroll the Quarter-Kelly size can fall below the venue
-            # minimum. Lift to the minimum, but keep any single minimum-size order
-            # within ~1/3 of the account (35%) so the bot keeps trading without
-            # betting the whole balance on one 5-share Polymarket order.
+            # With a small bankroll the Kelly size can fall below the venue minimum.
+            # Lift to the minimum so the bot keeps trading even on a tiny balance,
+            # but never let a single minimum order exceed the available bankroll.
             min_shares = fee_models.POLYMARKET_MIN_SHARES if v == "polymarket" else 1.0
-            if min_shares * price > br * 0.35:
+            if min_shares * price > br:
                 return 0.0
             size = min_shares
         return size

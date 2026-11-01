@@ -6,7 +6,7 @@ trading:
   quarter_kelly_cap_pct: 2.8    # per-trade max risk (Kalshi), ~40% larger; Polymarket uses its own cap
   max_exposure_pct: 35.0        # total open notional (per venue) cap, % of live balance — "don't burn the bankroll"
   polymarket_cap_pct: 1.0       # tighter per-trade Kelly cap
-  polymarket_exposure_pct: 35.0 # total Polymarket open notional cap, % of live balance
+  polymarket_exposure_pct: 100.0 # total Polymarket open notional cap, % of live balance
   min_ev_threshold: 0.01        # minimum expected-value edge (net of fees) before firing
   chase_guard_pct: 0.1          # don't buy a side that already moved >0.1% this window (anti-chase)
   entry_warmup_seconds: 60.0    # stay flat for the first 60s of a window (let info develop)
@@ -56,7 +56,7 @@ strategies:
   market_maker:
     enabled: true
     min_time_remaining: 120
-    levels: 3
+    levels: 1
     min_spread: 0.02
     refresh_seconds: 60
     spot_move_pct: 0.03
