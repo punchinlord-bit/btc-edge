@@ -463,6 +463,11 @@ class TradingLoop:
 
             # Record the REAL order that was just submitted to the exchange.
             exposure += notional
+            # Optimistic balance deduction so the wallet widget doesn't sit frozen
+            # until the next 30s poll — deduct the notional immediately.
+            bal = self.state.wallet_balances.get(venue)
+            if bal is not None:
+                self.state.wallet_balances[venue] = max(0.0, bal - notional)
             self._open.append({
                 "tf": tf, "venue": venue, "side": d.side, "action": d.action,
                 "price": d.price, "size": size, "fee": fee,

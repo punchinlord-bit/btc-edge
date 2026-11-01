@@ -66,7 +66,7 @@ async def _portfolio_loop(settings, engine_state, kalshi_client, poly_client) ->
 
     log = logging.getLogger("portfolio_loop")
     ticker = settings.kalshi.market_ticker
-    interval = max(15, int(getattr(settings, "portfolio_poll_seconds", 30) or 30))
+    interval = max(5, int(getattr(settings, "portfolio_poll_seconds", 10) or 10))
     while True:
         recent: list = []
         open_pos: list = []
