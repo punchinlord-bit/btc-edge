@@ -87,6 +87,8 @@ class TradingLoop:
         # Track which (window_end, venue) we've already sent a "last minute" heads-up
         # for, so each 15m window fires exactly one notification per venue.
         self._notified_last_minute: set[tuple[int, str]] = set()
+        # Last ensemble signal direction per venue (for flip detection).
+        self._last_signal_dir: dict[str, str] = {}
 
         self._windows: dict[tuple[int, str], dict[str, Any]] = {
             (tf, venue): {"window_ts": None, "open_price": None, "last_features": {}}
@@ -512,6 +514,36 @@ class TradingLoop:
             )
             self.state.signals = [f"No edge yet — news is {tone}. Waiting for a setup."]
 
+    def _flip_reversals(self, ctx: MarketContext, venue: str, decisions: list[Any]) -> None:
+        """Exit-and-reverse when the ensemble signal flips mid-window.
+
+        Tracks the last signal direction per venue. When it flips (up <-> down) we
+        emit a taker decision on the NEW side immediately, so money isn't held on
+        the stale side for the rest of the window. The router then buys the new
+        side at the market, which (combined with settlement of the old side) nets
+        out to a reversal.
+        """
+        direction = "up" if ctx.prob_estimate >= 0.5 else "down"
+        prev = self._last_signal_dir.get(venue)
+        self._last_signal_dir[venue] = direction
+        if prev is None or prev == direction:
+            return
+        from btc_edge.strategies.base import StrategyDecision
+
+        price = ctx.contract_price
+        decisions.append(StrategyDecision(
+            strategy="flip_reversal",
+            side=direction,
+            action="buy",
+            price=price,
+            size=5.0,
+            order_type="taker",
+            reason=f"signal flipped {prev} -> {direction}",
+            prob_estimate=ctx.prob_estimate,
+            ev_estimate=abs(ctx.prob_estimate - price),
+            rule_snapshot={},
+        ))
+
     async def tick(self) -> None:
         if self.state.btc_price is None:
             return
@@ -530,6 +562,7 @@ class TradingLoop:
                     decisions.extend(strat.evaluate(ctx))
                 except Exception as exc:  # noqa: BLE001
                     logger.debug("%s evaluate error: %s", strat.name, exc)
+            self._flip_reversals(ctx, venue, decisions)
             if decisions and not self.state.kill_switch:
                 await self._route_decisions(decisions, tf, venue, label)
             all_decisions.extend(decisions)
