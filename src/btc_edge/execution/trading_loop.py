@@ -84,6 +84,7 @@ class TradingLoop:
 
         self._alerter = build_alerter(settings)
         self._last_alert_ts = 0.0
+        self._last_digest_ts = 0.0
         # Track which (window_end, venue) we've already sent a "last minute" heads-up
         # for, so each 15m window fires exactly one notification per venue.
         self._notified_last_minute: set[tuple[int, str]] = set()
@@ -242,17 +243,6 @@ class TradingLoop:
         ens.update(features, outcome, tf)
         ens.retrain_lgbm()
         self._persist_registry()
-
-        # Brain-update notification: tell the operator what the model just learned.
-        if self._alerter.enabled:
-            direction = "UP" if outcome >= 0.5 else "DOWN"
-            spot_txt = f"${spot:,.0f}" if spot else "--"
-            open_txt = f"${open_price:,.0f}" if open_price else "--"
-            with contextlib.suppress(Exception):
-                asyncio.create_task(self._alerter.send(
-                    f"🧠 Brain update ({venue} {tf}s): BTC settled {direction}\n"
-                    f"window {open_txt} → {spot_txt}"
-                ))
 
     def _persist_registry(self) -> None:
         """Best-effort persist the registry to SQLite (throttled, never crashes)."""
@@ -692,6 +682,7 @@ class TradingLoop:
             try:
                 await self.tick()
                 self._maybe_notify_last_minute(time.time())
+                self._maybe_send_daily_digest(time.time())
             except Exception as exc:  # noqa: BLE001 - the loop must never die
                 logger.warning("Trading loop error: %s", exc)
             await asyncio.sleep(interval)
@@ -735,6 +726,35 @@ class TradingLoop:
             )
             with contextlib.suppress(Exception):
                 asyncio.create_task(self._alerter.send(text))
+
+    def _maybe_send_daily_digest(self, now: float) -> None:
+        """Send one consolidated daily digest instead of per-window spam.
+
+        Summarizes today's trades, win rate, and P&L per venue plus the model's
+        posture, firing at most once per 24 hours so the operator isn't spammed.
+        """
+        if not self._alerter.enabled:
+            return
+        if now - self._last_digest_ts < 86400.0:
+            return
+        self._last_digest_ts = now
+
+        lines = ["🧠 BTC-Edge daily brain digest"]
+        for venue in ("kalshi", "polymarket"):
+            vs = self._venue_stats.get(venue, {})
+            trades = int(vs.get("trades", 0))
+            wins = int(vs.get("wins", 0))
+            pnl = float(vs.get("pnl_usd", 0.0))
+            wr = (wins / trades * 100.0) if trades else 0.0
+            pnl_txt = f"{'+' if pnl >= 0 else ''}${pnl:.2f}"
+            lines.append(f"• {venue}: {trades} trades · {wr:.0f}% win · {pnl_txt}")
+        # Model posture: the ensembles keep learning each 15m window; the plan is
+        # to continue the same directional strategy and let the edge filter gate
+        # every order. Review exposure tomorrow morning.
+        lines.append("• Model: online learning continues each window (no manual change).")
+        lines.append("• Plan: keep directional entries; edge filter gates every order.")
+        with contextlib.suppress(Exception):
+            asyncio.create_task(self._alerter.send("\n".join(lines)))
 
     async def seed_from_history(self) -> None:
         """Best-effort: pre-train both venue ensembles from real resolved markets.
