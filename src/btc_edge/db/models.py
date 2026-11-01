@@ -197,10 +197,16 @@ class StrategyVersion(Base):
 
 
 class Btc15mWindowEvaluation(Base):
-    """15-minute BTC window evaluation ledger (OOS samples for the gate)."""
+    """15-minute BTC window evaluation ledger (OOS samples for the gate).
+
+    Primary key is the composite ``(market_key, window_start_sec)`` so Kalshi and
+    Polymarket windows never collide — each venue keeps its own independent OOS
+    ledger for its own prediction model.
+    """
 
     __tablename__ = "btc_15m_window_evaluations"
 
+    market_key: Mapped[str] = mapped_column(String(32), primary_key=True, default="btc_15m")
     window_start_sec: Mapped[int] = mapped_column(Integer, primary_key=True)
     strike_price: Mapped[float] = mapped_column(Float)
     close_price: Mapped[float] = mapped_column(Float)

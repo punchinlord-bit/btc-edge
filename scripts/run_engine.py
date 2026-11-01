@@ -134,20 +134,23 @@ def main() -> int:
     except Exception as exc:  # noqa: BLE001 - registry load is best-effort
         print(f"Strategy registry load skipped: {exc}")
 
-    # Seed a default CHAMPION if none exists so the promotion gate has a baseline.
-    # (The gate never edits live champion weights in place — only CHALLENGERs.)
-    if _registry.champion_id is None:
-        _registry.register_champion(
-            "champion-v1",
-            {
-                "bias": 0.0,
-                "contract_price": 0.6,
-                "option_implied_prob": 0.2,
-                "window_delta_pct": 0.15,
-                "book_imbalance": 0.1,
-                "news_sentiment": 0.05,
-            },
-        )
+    # Seed a default CHAMPION per venue if none exists so each venue's promotion
+    # gate has its own baseline. Kalshi and Polymarket learn independently (their
+    # own ensembles, windows, and champions) — they must never share a champion.
+    for _venue in ("kalshi", "polymarket"):
+        if not any(v.market_key == _venue for v in _registry.versions.values()):
+            _registry.register_champion(
+                f"champion-{_venue}-v1",
+                {
+                    "bias": 0.0,
+                    "contract_price": 0.6,
+                    "option_implied_prob": 0.2,
+                    "window_delta_pct": 0.15,
+                    "book_imbalance": 0.1,
+                    "news_sentiment": 0.05,
+                },
+                market_key=_venue,
+            )
 
     # Build the news-intelligence pipeline.
     scraper = NewsScraper(
@@ -203,6 +206,9 @@ def main() -> int:
         registry=_registry,
     )
     loop.create_task(trader.run())
+
+    # Warm-start the Kalshi model on real settled windows (best-effort, async).
+    loop.create_task(trader.seed_from_history())
 
     # Refresh REAL portfolio data (balances, fills, settlements, positions).
     loop.create_task(_portfolio_loop(settings, engine_state, kalshi_client, poly_client))

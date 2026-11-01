@@ -24,9 +24,31 @@ def create_engine_for(path: str | Path) -> Engine:
     return create_engine(url, future=True, connect_args={"check_same_thread": False})
 
 
+def _migrate_schema(engine: Engine) -> None:
+    """Apply lightweight SQLite schema migrations.
+
+    ``btc_15m_window_evaluations`` was originally keyed only by
+    ``window_start_sec``, so Kalshi and Polymarket windows (which share the same
+    15-minute alignment) collided and overwrote each other. We re-key it on the
+    composite ``(market_key, window_start_sec)``; the old venue-less rows are
+    ambiguous, so they are dropped.
+    """
+    import sqlalchemy as sa
+
+    insp = sa.inspect(engine)
+    if "btc_15m_window_evaluations" not in insp.get_table_names():
+        return
+    cols = [c["name"] for c in insp.get_columns("btc_15m_window_evaluations")]
+    if "market_key" in cols:
+        return
+    with engine.begin() as conn:
+        conn.execute(sa.text("DROP TABLE btc_15m_window_evaluations"))
+
+
 def init_db(path: str | Path) -> Engine:
     """Create the engine and all tables if they do not exist."""
     engine = create_engine_for(path)
+    _migrate_schema(engine)
     Base.metadata.create_all(engine)
     return engine
 

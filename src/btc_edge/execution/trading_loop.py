@@ -64,6 +64,7 @@ class TradingLoop:
         self.settings = settings
         self.feed = feed
         self.registry = registry or Registry()
+        self.kalshi_client = kalshi_client
         self._ensembles: dict[tuple[int, str], ProbabilityEnsemble] = {
             (tf, venue): ProbabilityEnsemble() for tf, venue, _ in TRADING_WINDOWS
         }
@@ -210,6 +211,7 @@ class TradingLoop:
             close_price=spot,
             outcome=1 if outcome >= 0.5 else 0,
             regime=regime,
+            market_key=venue,  # venue-scoped OOS sample (kalshi vs polymarket)
             features=normalized,
             market_ask_up=0.52,
             market_ask_down=0.52,
@@ -222,13 +224,18 @@ class TradingLoop:
         apply_update = True
         if champion_config and challenger_config:
             champion = StrategyVersion(
-                version_id=f"{venue}-{tf}-champion", status=CHAMPION, config=champion_config
+                version_id=f"{venue}-{tf}-champion", status=CHAMPION,
+                market_key=venue, config=champion_config,
             )
             challenger = StrategyVersion(
-                version_id=f"{venue}-{tf}-{int(time.time())}", config=challenger_config
+                version_id=f"{venue}-{tf}-{int(time.time())}",
+                market_key=venue, config=challenger_config,
             )
+            # Evaluate the challenger ONLY against this venue's OOS windows so a
+            # Kalshi update is never judged on Polymarket outcomes (and vice versa).
+            venue_windows = [w for w in self.registry.windows if w.market_key == venue]
             result = self.registry.gate.evaluate_and_promote(
-                challenger, self.registry.windows, champion
+                challenger, venue_windows, champion
             )
             self.registry.last_result = {
                 "passed": result.passed,
@@ -537,3 +544,19 @@ class TradingLoop:
             except Exception as exc:  # noqa: BLE001 - the loop must never die
                 logger.warning("Trading loop error: %s", exc)
             await asyncio.sleep(interval)
+
+    async def seed_from_history(self) -> None:
+        """Best-effort: pre-train the Kalshi ensemble from real settled markets.
+
+        Called once at startup so the Kalshi model doesn't start blank — it is
+        warm-started on the real resolved BTC up/down windows already available
+        from the exchange.
+        """
+        if self.kalshi_client is None:
+            return
+        ens = self._ensembles.get((900, "kalshi"))
+        if ens is None:
+            return
+        from btc_edge.ml.seed_history import seed_ensemble_from_kalshi
+
+        await seed_ensemble_from_kalshi(ens, self.kalshi_client, 900)

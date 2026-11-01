@@ -34,8 +34,13 @@ class Registry:
     def champion(self) -> StrategyVersion | None:
         return self.versions.get(self.champion_id) if self.champion_id else None
 
-    def register_champion(self, version_id: str, config: dict[str, float]) -> StrategyVersion:
-        v = StrategyVersion(version_id=version_id, status=CHAMPION, config=config)
+    def register_champion(
+        self,
+        version_id: str,
+        config: dict[str, float],
+        market_key: str = "btc_15m",
+    ) -> StrategyVersion:
+        v = StrategyVersion(version_id=version_id, status=CHAMPION, config=config, market_key=market_key)
         self.versions[version_id] = v
         self.champion_id = version_id
         return v
@@ -99,9 +104,10 @@ def save_registry(session: Any, registry: Registry) -> None:
         row.evaluated_at = time.time()
 
     for w in registry.windows:
-        row = session.get(Btc15mWindowEvaluation, w.window_start_sec)
+        row = session.get(Btc15mWindowEvaluation, (w.market_key, w.window_start_sec))
         if row is None:
             row = Btc15mWindowEvaluation(
+                market_key=w.market_key,
                 window_start_sec=w.window_start_sec,
                 strike_price=w.strike_price,
                 close_price=w.close_price,
@@ -144,6 +150,7 @@ def load_registry(session: Any, registry: Registry | None = None) -> Registry:
             close_price=row.close_price,
             outcome=row.outcome,
             regime=row.regime,
+            market_key=row.market_key,
             features=json.loads(row.features_json or "{}"),
             market_ask_up=row.market_ask_up,
             market_ask_down=row.market_ask_down,

@@ -288,13 +288,28 @@ class KalshiClient:
         await self.intra_account_transfer(amount_centicents=int(round(move * 10_000.0)))
         return True
 
-    async def get_markets(self, ticker: str | None = None, status: str | None = None) -> dict[str, Any]:
+    async def get_markets(
+        self,
+        ticker: str | None = None,
+        status: str | None = None,
+        series_ticker: str | None = None,
+        limit: int | None = None,
+    ) -> dict[str, Any]:
         params: dict[str, Any] = {}
         if ticker:
             params["tickers"] = ticker
+        if series_ticker:
+            params["series_ticker"] = series_ticker
         if status:
             params["status"] = status
+        if limit:
+            params["limit"] = limit
         return await self._request("GET", "/markets", params=params)
+
+    async def get_settled_btc_markets(self, limit: int = 200) -> list[dict[str, Any]]:
+        """Fetch settled KXBTC15M markets (real resolved BTC up/down windows)."""
+        data = await self.get_markets(series_ticker="KXBTC15M", status="settled", limit=limit)
+        return data.get("markets", []) if isinstance(data, dict) else []
 
     async def get_btc_markets(self) -> list[dict[str, Any]]:
         """Fetch the KXBTC15M series (15-minute BTC up/down markets)."""

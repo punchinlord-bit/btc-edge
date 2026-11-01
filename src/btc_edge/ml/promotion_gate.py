@@ -44,13 +44,20 @@ def classify_3regime(abs_move_pct: float) -> str:
 
 @dataclass(slots=True)
 class WindowEvaluation:
-    """One resolved 15-minute BTC window (a single OOS sample for the gate)."""
+    """One resolved 15-minute BTC window (a single OOS sample for the gate).
+
+    ``market_key`` scopes the window to a single venue (``kalshi`` vs
+    ``polymarket``) so the two venues' prediction models and their OOS ledgers
+    stay fully separated — they settle the same BTC move but from different
+    order books and different learning histories.
+    """
 
     window_start_sec: int
     strike_price: float
     close_price: float
     outcome: int  # 1 if "up" won, 0 if "down" won
     regime: str  # chop | trend | spike
+    market_key: str = "btc_15m"
     features: dict[str, float] = field(default_factory=dict)
     market_ask_up: float = 0.55
     market_ask_down: float = 0.55
