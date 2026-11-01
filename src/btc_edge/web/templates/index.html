@@ -377,21 +377,6 @@
         if (r.ok) renderGate(await r.json());
       } catch (e) { /* ignore */ }
     }
-    document.getElementById('gate-eval-btn').addEventListener('click', async () => {
-      ensureKey();
-      const btn = document.getElementById('gate-eval-btn');
-      btn.disabled = true; btn.textContent = 'Evaluating…';
-      try {
-        const h = apiHeaders(); h['Content-Type'] = 'application/json';
-        const r = await fetch('/api/btc-15m/gate/evaluate', {
-          method: 'POST', headers: h,
-          body: JSON.stringify({ version_id: 'challenger-' + Date.now(), config: { bias: 0.0, x1: 1.0, x2: 0.5 } }),
-        });
-        renderGate({ champion_version_id: null, oos_window_count: null, last_result: await r.json() });
-        pollGate();
-      } catch (e) { toast('Gate evaluation failed'); }
-      btn.disabled = false; btn.textContent = 'Run Now';
-    });
     function pctBar(p, color) {
       if (p == null || isNaN(p)) return '<div class="text-gray-500">--</div>';
       const w = Math.max(0, Math.min(100, p * 100));
@@ -634,8 +619,8 @@
   <section class="card mb-6">
     <div class="widget-title"><span>🚀</span> Live Rocket <span class="normal-case text-gray-500 font-normal">(Kalshi &amp; Polymarket, independent models)</span></div>
     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-      <iframe src="/rocket?venue=kalshi&v=3" class="w-full" style="height:430px;border:0;border-radius:12px" title="Kalshi rocket"></iframe>
-      <iframe src="/rocket?venue=polymarket&v=3" class="w-full" style="height:430px;border:0;border-radius:12px" title="Polymarket rocket"></iframe>
+      <iframe src="/rocket?venue=kalshi&v=4" class="w-full" style="height:430px;border:0;border-radius:12px" title="Kalshi rocket"></iframe>
+      <iframe src="/rocket?venue=polymarket&v=4" class="w-full" style="height:430px;border:0;border-radius:12px" title="Polymarket rocket"></iframe>
     </div>
   </section>
 </body>
