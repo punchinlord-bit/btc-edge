@@ -452,11 +452,10 @@ class PolymarketUSClient:
             "tif": tif,
         }
         resp = self.client.orders.create(params)
-        # Polymarket returns HTTP 200 even for orders it does NOT accept — the
-        # terminal state lives in ``executions[].type``. Surface any terminal
-        # non-fill state (REJECTED / CANCELED / EXPIRED / DONE_FOR_DAY) as an
-        # error so the trading loop does not record a phantom "fill" (and Telegram
-        # alert) for an order that never landed on the venue.
+        # Polymarket returns HTTP 200 with an id even for orders it REJECTS. The
+        # rejection is NOT in the create response — it lives in the order's
+        # ``state``, retrievable via ``/v1/order/{id}``. Confirm the order actually
+        # rested and surface rejections so the loop never records a phantom "fill".
         executions = resp.get("executions") if isinstance(resp, dict) else []
         terminal_fail = {
             "EXECUTION_TYPE_REJECTED",
@@ -469,10 +468,21 @@ class PolymarketUSClient:
             if ex_type in terminal_fail:
                 reason = ex.get("orderRejectReason") or ex.get("text") or ex_type
                 raise RuntimeError(f"Polymarket order not accepted ({ex_type}): {reason}")
-        states = [ex.get("type") for ex in (executions or [])] or ["(resting)"]
+
+        oid = resp.get("id") if isinstance(resp, dict) else None
+        state = ""
+        if oid:
+            try:
+                detail = self.client.orders.retrieve(oid)
+                state = ((detail or {}).get("order") or {}).get("state", "")
+            except Exception as exc:  # noqa: BLE001 - retrieve is best-effort
+                logger.debug("Polymarket order retrieve failed: %s", exc)
+        if state in ("ORDER_STATE_REJECTED", "ORDER_STATE_CANCELED", "ORDER_STATE_EXPIRED"):
+            raise RuntimeError(f"Polymarket order not accepted ({state})")
+
         logger.info(
-            "Polymarket order submitted: %s %s %s qty=%d px=%.2f -> %s",
-            action, side, slug, quantity, px, states,
+            "Polymarket order submitted: %s %s %s qty=%d px=%.2f -> state=%s",
+            action, side, slug, quantity, px, state or "resting",
         )
         return resp
 
