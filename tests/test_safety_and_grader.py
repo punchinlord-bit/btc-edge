@@ -61,6 +61,9 @@ def test_trading_config_conservative_defaults():
     assert cfg.quarter_kelly_cap_pct == 2.0
     assert cfg.max_exposure_pct == 35.0
     assert cfg.max_daily_loss_pct == 5.0
+    # Polymarket is tuned tighter (more volatile).
+    assert cfg.polymarket_cap_pct == 1.0
+    assert cfg.polymarket_exposure_pct == 20.0
 
 
 def test_quarter_kelly_small_cap_pct():

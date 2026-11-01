@@ -86,8 +86,8 @@ canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
   </div>
   <div class="foot"><span>Streak <b id="streak">0</b></span><span>Model fair <b id="fair" style="color:var(--c)">--</b></span><span>Paper only</span></div>
 
-  <div class="card">
-    <div class="ch"><div><strong>Champion vs Challenger Gate</strong><small id="gsrc">Demo data. Connect backend for live results.</small></div><button class="gbtn" id="gbtn">Test Challenger</button></div>
+  <details class="card">
+    <summary class="ch"><div><strong>Champion vs Challenger Gate</strong><small id="gsrc">Internal (auto, tap to expand)</small></div></summary>
     <div class="gg">
       <div class="gc"><div>OOS Brier<span class="bw" id="g-brier-b">--</span></div><div id="g-brier">--</div></div>
       <div class="gc"><div>Net EV edge<span class="bw" id="g-ev-b">--</span></div><div id="g-ev">--</div></div>
@@ -95,7 +95,8 @@ canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
       <div class="gc"><div>±10% jitter<span class="bw" id="g-jitter-b">--</span></div><div id="g-jitter">--</div></div>
     </div>
     <div class="gc" style="margin-top:8px"><div>Verdict<span class="bw" id="g-verdict-b">IDLE</span></div><div id="g-verdict">No run yet</div></div>
-  </div>
+    <div class="ch" style="margin-top:8px"><div></div><button class="gbtn" id="gbtn">Test Challenger</button></div>
+  </details>
 
   <div class="card">
     <div class="ch"><div><strong>Operator Execution</strong><small>Locked to active CHAMPION</small></div></div>

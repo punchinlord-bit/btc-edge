@@ -420,7 +420,10 @@ class TradingLoop:
         # the bot can never stack many minimum-size orders into a full-bankroll
         # position between balance polls.
         br = live_balance if live_balance > 0 else self.settings.trading.bankroll
-        max_exposure = br * self.settings.trading.max_exposure_pct / 100.0
+        exposure_pct = self.settings.trading.max_exposure_pct
+        if venue == "polymarket":
+            exposure_pct = self.settings.trading.polymarket_exposure_pct
+        max_exposure = br * exposure_pct / 100.0
         exposure = sum(p["price"] * p["size"] for p in self._open if p.get("venue") == venue)
         for d in decisions:
             size = self.router.size_for(d, venue=venue, bankroll=live_balance)
@@ -546,17 +549,24 @@ class TradingLoop:
             await asyncio.sleep(interval)
 
     async def seed_from_history(self) -> None:
-        """Best-effort: pre-train the Kalshi ensemble from real settled markets.
+        """Best-effort: pre-train both venue ensembles from real resolved markets.
 
-        Called once at startup so the Kalshi model doesn't start blank — it is
-        warm-started on the real resolved BTC up/down windows already available
-        from the exchange.
+        Called once at startup so neither model starts blank. Kalshi is warm-started
+        on real settled windows (BTC move + outcome); Polymarket is warm-started on
+        the resolved up/down base rate from the Gamma API.
         """
-        if self.kalshi_client is None:
-            return
-        ens = self._ensembles.get((900, "kalshi"))
-        if ens is None:
-            return
-        from btc_edge.ml.seed_history import seed_ensemble_from_kalshi
+        from btc_edge.ml.seed_history import (
+            seed_ensemble_from_kalshi,
+            seed_ensemble_from_polymarket,
+        )
 
-        await seed_ensemble_from_kalshi(ens, self.kalshi_client, 900)
+        if self.kalshi_client is not None:
+            ens = self._ensembles.get((900, "kalshi"))
+            if ens is not None:
+                await seed_ensemble_from_kalshi(ens, self.kalshi_client, 900)
+
+        ens = self._ensembles.get((900, "polymarket"))
+        if ens is not None:
+            await seed_ensemble_from_polymarket(
+                ens, self.settings.polymarket.gamma_api_url, 900
+            )

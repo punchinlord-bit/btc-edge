@@ -39,10 +39,21 @@ class TradingConfig(BaseModel):
     # from piling multiple minimum-size orders on top of each other between
     # balance polls.
     max_exposure_pct: float = 35.0
+    # Polymarket is more volatile (wider 5-share min relative to a small
+    # account, thinner liquidity), so it gets a TIGHTER per-trade cap and a
+    # LOWER total-exposure cap than Kalshi. This keeps the PM leg from
+    # "drunk-betting" the bankroll while Kalshi trades at full efficiency.
+    polymarket_cap_pct: float = 1.0
+    polymarket_exposure_pct: float = 20.0
     min_ev_threshold: float = 0.01
 
     @field_validator(
-        "bankroll", "max_daily_loss_pct", "quarter_kelly_cap_pct", "max_exposure_pct"
+        "bankroll",
+        "max_daily_loss_pct",
+        "quarter_kelly_cap_pct",
+        "max_exposure_pct",
+        "polymarket_cap_pct",
+        "polymarket_exposure_pct",
     )
     @classmethod
     def _positive(cls, v: float) -> float:

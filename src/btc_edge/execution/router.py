@@ -99,12 +99,17 @@ class Router:
         *actual* wallet balance so sizing always scales with the money in the account.
         """
         br = bankroll if (bankroll is not None and bankroll > 0) else self.settings.trading.bankroll
+        v = venue or _venue(decision, self.settings)
+        # Polymarket gets a tighter per-trade cap: it is more volatile and its
+        # 5-share minimum is a bigger slice of a small account than Kalshi's
+        # 1-contract minimum.
         cap_pct = self.settings.trading.quarter_kelly_cap_pct
+        if v == "polymarket":
+            cap_pct = self.settings.trading.polymarket_cap_pct
         prob = decision.prob_estimate
         price = decision.price
         dollar = quarter_kelly_size(prob, price, br, cap_pct)
         size = shares_from_dollars(dollar, price)
-        v = venue or _venue(decision, self.settings)
         size = fee_models.apply_min_order(v, size)
         if size <= 0:
             # With a small bankroll the Quarter-Kelly size can fall below the venue

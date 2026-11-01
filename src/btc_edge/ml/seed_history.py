@@ -10,7 +10,9 @@ real BTC move (``floor_strike`` -> ``expiration_value``) plus the up/down
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -91,3 +93,84 @@ async def seed_ensemble_from_kalshi(ens: Any, client: Any, tf: int, limit: int =
         sum(1 for _, o in samples if o >= 0.5),
     )
     return len(samples)
+
+
+async def seed_ensemble_from_polymarket(
+    ens: Any, gamma_base_url: str, tf: int, limit: int = 60
+) -> int:
+    """Warm-start the Polymarket ensemble from recently-resolved up/down markets.
+
+    Polymarket has no cheap "list settled series" endpoint, so we walk back over
+    the last ``limit`` deterministic 15m slugs and read each resolved market's
+    outcome from the Gamma API. Only the up/down outcome (base rate) is seeded —
+    Polymarket does not expose the reference BTC open/close that Kalshi does.
+    """
+    try:
+        from btc_edge.connectors.poly_client import GammaClient, compute_window_ts, slug_for
+
+        gamma = GammaClient(base_url=gamma_base_url)
+        now = time.time()
+        window_ts = compute_window_ts(now, tf)
+        samples: list[tuple[dict[str, float], float]] = []
+        for i in range(limit):
+            past_ts = window_ts - i * tf
+            slug = slug_for(tf, past_ts)
+            try:
+                events = await asyncio.to_thread(gamma.get_events, slug)
+            except Exception:  # noqa: BLE001 - skip unresolvable windows
+                continue
+            outcome = _resolved_outcome(events)
+            if outcome is None:
+                continue
+            features = {
+                "window_delta_pct": 0.0,
+                "option_implied_prob": 0.5,
+                "book_imbalance": 0.0,
+                "micro_acceleration": 0.0,
+                "news_sentiment": 0.0,
+                "time_remaining": 0.0,
+                "regime_dampening": 0.0,
+                "regime_amplifying": 0.0,
+                "contract_price": 0.5,
+                "realized_vol": 0.0,
+                "implied_vol": 0.0,
+            }
+            samples.append((features, outcome))
+    except Exception as exc:  # noqa: BLE001 - seeding is best-effort
+        logger.warning("Polymarket history seed fetch failed: %s", exc)
+        return 0
+
+    if not samples:
+        logger.info("No resolved Polymarket markets available to seed the model.")
+        return 0
+
+    for features, outcome in samples:
+        ens.update(features, outcome, tf)
+    ens.retrain_lgbm()
+    logger.info(
+        "Seeded Polymarket ensemble with %d resolved windows (%d up).",
+        len(samples),
+        sum(1 for _, o in samples if o >= 0.5),
+    )
+    return len(samples)
+
+
+def _resolved_outcome(events: list[dict[str, Any]]) -> float | None:
+    """Return 1.0 (up won) / 0.0 (down won) for a resolved Polymarket market."""
+    for event in events:
+        for market in event.get("markets", []):
+            prices = market.get("outcomePrices") or market.get("outcome_prices")
+            if not prices:
+                continue
+            try:
+                vals = [float(p) for p in prices]
+            except (TypeError, ValueError):
+                continue
+            if len(vals) != 2:
+                continue
+            # Resolved: exactly one leg at ~1.0 and the other at ~0.0.
+            if vals[0] >= 0.99 and vals[1] <= 0.01:
+                return 1.0
+            if vals[1] >= 0.99 and vals[0] <= 0.01:
+                return 0.0
+    return None

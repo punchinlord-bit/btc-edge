@@ -5,6 +5,8 @@ trading:
   max_daily_loss_pct: 5.0       # circuit breaker: halt if daily loss exceeds this % of bankroll
   quarter_kelly_cap_pct: 2.0    # per-trade max risk, capped at 2% of bankroll (small threshold)
   max_exposure_pct: 35.0        # total open notional (per venue) cap, % of live balance — "don't burn the bankroll"
+  polymarket_cap_pct: 1.0       # Polymarket per-trade cap (tighter: more volatile)
+  polymarket_exposure_pct: 20.0 # Polymarket total-exposure cap (tighter: more volatile)
   min_ev_threshold: 0.01        # minimum expected-value edge (net of fees) before firing
 
 polymarket:
