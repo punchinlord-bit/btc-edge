@@ -894,9 +894,17 @@ class TradingLoop:
         if now - self._last_alert_ts < 30.0:
             return
         self._last_alert_ts = now
+        venue_label = "KALSHI" if venue == "kalshi" else "POLYMARKET"
         direction = "UP" if d.side == "up" else "DOWN"
         pct = int(round(d.price * 100))
-        text = f"🎯 Bought {direction} at {pct}% — ${notional:.2f} in. Looking good, good luck!"
+        # Each contract pays $1 if it resolves correct, so the payout is the contract
+        # count; net profit is payout minus the notional spent.
+        payout = size
+        profit = payout - notional
+        text = (
+            f"🎯 {venue_label} bought {direction}: {size:.1f} contracts @ {pct}¢ — "
+            f"spending ${notional:.2f} to make ${payout:.2f} (+${profit:.2f}). 🚀"
+        )
         with contextlib.suppress(Exception):
             asyncio.create_task(self._alerter.send(text))
 

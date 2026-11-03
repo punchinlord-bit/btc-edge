@@ -23,7 +23,10 @@ htmlcov/
 # Data artifacts (large / regenerated)
 data/raw/
 data/historical/
+data/archive/
 data/*.db
+data/*.db-shm
+data/*.db-wal
 data/*.sqlite3
 data/*.json
 data/*.jsonl

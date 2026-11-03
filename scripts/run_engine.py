@@ -195,6 +195,7 @@ async def _reconciler_loop(settings, engine_state, kalshi_client) -> None:
     shadow_ledger = ShadowLedger()
     interval = 60.0
     last_sent = 0.0
+    last_signature: tuple | None = None
     while True:
         try:
             if reconciler is not None:
@@ -215,14 +216,22 @@ async def _reconciler_loop(settings, engine_state, kalshi_client) -> None:
                     "human_manual": {"wins": sb.human_manual.wins, "losses": sb.human_manual.losses,
                                      "pnl": sb.human_manual.pnl},
                 }
-                # Throttle the Telegram push to once per 15 minutes (still reconcile
-                # every 60s for the dashboard).
+                # Push to Telegram ONLY when the scoreboard actually changed (a new
+                # trade/settlement landed) — never re-send the same "AI so far" line on
+                # a timer. Also keep a 15-min floor so a burst of trades doesn't spam.
+                signature = (
+                    sb.ai_live.wins, sb.ai_live.losses, sb.ai_live.pnl,
+                    sb.ai_shadow.wins, sb.ai_shadow.losses,
+                    sb.human_manual.wins, sb.human_manual.losses,
+                )
                 if (
                     _alerter.enabled
                     and (time.time() - last_sent >= 900.0)
+                    and signature != last_signature
                     and (sb.ai_live.trades or sb.ai_shadow.trades or sb.human_manual.trades)
                 ):
                     last_sent = time.time()
+                    last_signature = signature
                     with contextlib.suppress(Exception):
                         asyncio.create_task(_alerter.send(format_telegram(sb)))
                 log.info("reconciler: AI %dW/%dL · Human %dW/%dL · Shadow %dW/%dL",
