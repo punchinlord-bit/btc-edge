@@ -29,7 +29,9 @@ def test_dollars_and_price_normalization():
 
 class _FakeKalshi:
     async def get_balance(self):
-        return {"balance_dollars": 9.81}
+        # Kalshi returns "balance" (available cash) and "portfolio_value"
+        # (open positions), both in integer cents.
+        return {"balance": 981, "portfolio_value": 200}  # $9.81 cash + $2.00 positions
 
     async def get_fills(self, ticker=None, limit=100, cursor=None):
         return {
@@ -41,7 +43,14 @@ class _FakeKalshi:
         }
 
     async def get_settlements(self, ticker=None, limit=100):
-        return {"settlements": [{"realized_pnl": 40}, {"realized_pnl": -10}]}
+        # Kalshi /portfolio/settlements carries revenue (payout) + per-side cost
+        # basis, NOT realized_pnl (which is only in /portfolio/fills).
+        return {
+            "settlements": [
+                {"revenue": 100, "yes_total_cost": 60, "no_total_cost": 0},  # +40c
+                {"revenue": 0, "yes_total_cost": 10, "no_total_cost": 0},  # -10c
+            ],
+        }
 
     async def get_positions(self, limit=100):
         return {"market_positions": [
@@ -53,6 +62,7 @@ class _FakeKalshi:
 def test_poll_kalshi_normalizes_real_data():
     snap = asyncio.run(poll_kalshi(_FakeKalshi()))
     assert snap.balance == 9.81
+    assert snap.equity_usd == 9.81 + 2.00
     assert snap.venue_stats["trades"] == 1
     assert snap.venue_stats["notional_usd"] == 0.50 * 2
     assert snap.venue_stats["pnl_usd"] == 0.40 - 0.10

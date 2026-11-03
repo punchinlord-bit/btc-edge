@@ -30,11 +30,16 @@ def _strip_query(path: str) -> str:
 
 
 def _client_order_id(ticker: str, side: str, action: str, count: int, price: float) -> str:
-    """Unique client order id for idempotency (timestamp-based, 32 hex chars)."""
+    """Unique client order id for idempotency (timestamp-based, 32 hex chars).
+
+    Prefixed with ``AI_v3_`` so the reconciler can cleanly separate the bot's
+    orders from human/manual trades on the same Kalshi account.
+    """
     import hashlib
 
     raw = f"{ticker}|{side}|{action}|{count}|{price}|{time.time()}"
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
+    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
+    return f"AI_v3_{digest}"
 
 
 def _load_private_key(pem_or_b64: str):
@@ -203,6 +208,13 @@ class KalshiClient:
 
         self._base_path = urlparse(base_url).path.rstrip("/") or ""
         self._bucket = TokenBucket(rate_limit_balance_per_sec)
+        # /portfolio/balance has its own metered bucket with *no burst* (1 req/sec
+        # for Basic/Advanced). The portfolio poller and ensure_crypto_balance() can
+        # collide within the same tick and both get 429, so cache the last result
+        # for a short TTL and invalidate on any transfer that changes the balance.
+        self._balance_cache: dict[str, Any] | None = None
+        self._balance_cache_ts: float = 0.0
+        self._balance_cache_ttl: float = 30.0
 
     def _signed_headers(self, method: str, path: str) -> dict[str, str]:
         if self.signer is None:
@@ -229,9 +241,28 @@ class KalshiClient:
             return resp.json()
 
     async def get_balance(self) -> dict[str, Any]:
-        """Get portfolio balance, rate-limited to <= 1 req/sec."""
+        """Get portfolio balance, rate-limited to <= 1 req/sec.
+
+        Returns a cached snapshot when one was fetched within the TTL, so the
+        portfolio poller and ``ensure_crypto_balance`` don't both hammer the
+        no-burst balance bucket and trip 429s.
+        """
+        now = time.monotonic()
+        if self._balance_cache is not None and (now - self._balance_cache_ts) < self._balance_cache_ttl:
+            return self._balance_cache
         await self._bucket.acquire(1.0)
-        return await self._request("GET", "/portfolio/balance")
+        try:
+            data = await self._request("GET", "/portfolio/balance")
+        except Exception:
+            # On a transient/rate-limit failure, return the last known balance
+            # (even if stale) so ensure_crypto_balance() and the poller don't fail
+            # and skip funding. Only propagate when we have never fetched once.
+            if self._balance_cache is not None:
+                return self._balance_cache
+            raise
+        self._balance_cache = data
+        self._balance_cache_ts = time.monotonic()
+        return data
 
     async def intra_account_transfer(
         self,
@@ -258,9 +289,12 @@ class KalshiClient:
             "source_subaccount": 0,
             "destination_subaccount": 0,
         }
-        return await self._request(
+        result = await self._request(
             "POST", "/portfolio/intra_exchange_instance_transfer", json_body=body
         )
+        # The transfer moves money between shards, so any cached balance is stale.
+        self._balance_cache = None
+        return result
 
     async def ensure_crypto_balance(self, min_dollars: float = 5.0) -> bool:
         """Top up the crypto (shard 2) balance from USD (shard 0) if it is low.
@@ -324,24 +358,30 @@ class KalshiClient:
     async def place_order(
         self,
         ticker: str,
-        side: str,  # yes | no
+        side: str,  # yes | no (the contract the caller wants to be long)
         action: str,  # buy | sell
         count: int,
-        price: float,  # dollars (0..1)
+        price: float,  # dollars (0..1) — the CONTRACT's own price (YES price for yes, NO price for no)
         order_type: str = "limit",
         post_only: bool = False,
     ) -> dict[str, Any]:
-        # Convert legacy (side=yes/no, action=buy/sell) to V2 (side=bid/ask).
-        # "bid" = buy YES (long yes); "ask" = sell YES (long no). Price is quoted
-        # in YES-leg fixed-point dollars.
-        long_yes = (action == "buy" and side == "yes") or (action == "sell" and side == "no")
-        v2_side = "bid" if long_yes else "ask"
-        yes_price = price if side == "yes" else (1.0 - price)
+        # Kalshi v2 order body needs BOTH fields:
+        #   side   = "bid" (YES contract) / "ask" (NO contract)  -> maps to outcome
+        #   action = "buy" / "sell"                                -> opens vs closes
+        # The price is always the YES-leg price ("direction does not change the
+        # price"), so a NO bet is sent as YES price = 1 - NO price.
+        v2_side = "bid" if side == "yes" else "ask"
+        yes_price = round(price if side == "yes" else (1.0 - price), 2)
+        logger.info(
+            "kalshi order map: side=%s action=%s price=%.4f -> v2_side=%s yes_price=%.2f",
+            side, action, price, v2_side, yes_price,
+        )
         body = {
             "ticker": ticker,
             "side": v2_side,
+            "action": action,
             "count": str(count),
-            "price": f"{yes_price:.4f}",
+            "price": f"{yes_price:.2f}",
             "time_in_force": "good_till_canceled" if order_type == "limit" else "immediate_or_cancel",
             "self_trade_prevention_type": "taker_at_cross",
             "client_order_id": _client_order_id(ticker, side, action, count, price),
@@ -392,6 +432,33 @@ class KalshiClient:
     async def get_positions(self, limit: int = 100) -> dict[str, Any]:
         """Fetch open positions (unsettled contracts currently held)."""
         return await self._request("GET", "/portfolio/positions", params={"limit": limit})
+
+    async def get_historical_cutoff(self, ticker: str | None = None) -> dict[str, Any]:
+        """Fetch the cutoff timestamp past which live records age into history."""
+        params = {"ticker": ticker} if ticker else None
+        return await self._request("GET", "/historical/cutoff", params=params)
+
+    async def get_historical_orders(
+        self, ticker: str | None = None, limit: int = 100, cursor: str | None = None
+    ) -> dict[str, Any]:
+        """Fetch historical (pre-cutoff) orders that have aged out of /portfolio/orders."""
+        params: dict[str, Any] = {"limit": limit}
+        if ticker:
+            params["ticker"] = ticker
+        if cursor:
+            params["cursor"] = cursor
+        return await self._request("GET", "/historical/orders", params=params)
+
+    async def get_historical_fills(
+        self, ticker: str | None = None, limit: int = 100, cursor: str | None = None
+    ) -> dict[str, Any]:
+        """Fetch historical (pre-cutoff) fills that have aged out of /portfolio/fills."""
+        params: dict[str, Any] = {"limit": limit}
+        if ticker:
+            params["ticker"] = ticker
+        if cursor:
+            params["cursor"] = cursor
+        return await self._request("GET", "/historical/fills", params=params)
 
 
 def parse_orderbook(payload: dict[str, Any], ticker: str) -> KalshiOrderBook:

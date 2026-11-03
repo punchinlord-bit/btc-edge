@@ -48,6 +48,12 @@ class SafetyWatchdog:
         self.poly_client = poly_client
         self.state = SafetyState(daily_start_equity=bankroll)
         self._alerted = False
+        # Startup grace: on engine restart the exchange WebSockets take up to ~30s
+        # to reconnect, which otherwise looks like a connectivity drop and fires a
+        # FALSE "emergency flush". Ignore health checks until this many seconds have
+        # elapsed since construction.
+        self._started_at = time.time()
+        self.startup_grace_seconds = 60.0
 
     def heartbeat(self, connector: str, ts: float | None = None) -> None:
         self.state.last_heartbeats[connector] = ts if ts is not None else time.time()
@@ -104,13 +110,17 @@ class SafetyWatchdog:
     def check_and_halt(self, connectors: list[str]) -> bool:
         """Evaluate health + loss limit; trigger flush/halt if necessary."""
         now = time.time()
-        if not self.healthy(connectors, now) and not self._alerted:
-            self._alerted = True
-            logger.critical("Connectivity lost > %ss; emergency flush", DISCONNECT_TIMEOUT_SECONDS)
-            self.emergency_flush()
-            return True
-        if self.healthy(connectors, now):
-            self._alerted = False
+        # Skip the HEALTH check during the startup grace window so a restart's
+        # connector warm-up doesn't read as a false connectivity drop. The daily
+        # loss limit is still enforced below (a real loss breach is never "false").
+        if now - self._started_at >= self.startup_grace_seconds:
+            if not self.healthy(connectors, now) and not self._alerted:
+                self._alerted = True
+                logger.critical("Connectivity lost > %ss; emergency flush", DISCONNECT_TIMEOUT_SECONDS)
+                self.emergency_flush()
+                return True
+            if self.healthy(connectors, now):
+                self._alerted = False
 
         if self.daily_loss_limit_breached():
             self.state.halted = True

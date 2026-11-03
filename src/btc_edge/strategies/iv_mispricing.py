@@ -1,6 +1,6 @@
 """Strategy 4: Deribit IV Option-Pricing Arb.
 
-Triggers when |option_implied_prob - market_mid_price| >= 4.5% divergence and
+Triggers when |option_implied_prob - market_mid_price| >= 2% divergence and
 spot orderflow (micro_acceleration / book_imbalance) confirms direction.
 """
 
@@ -13,7 +13,7 @@ from btc_edge.strategies.base import MarketContext, Strategy, StrategyDecision
 class IvMispricingStrategy(Strategy):
     name = "iv_mispricing"
 
-    def __init__(self, min_divergence: float = 0.045) -> None:
+    def __init__(self, min_divergence: float = 0.02) -> None:
         self.min_divergence = min_divergence
         self.rule = self._build_rule()
 
@@ -41,13 +41,16 @@ class IvMispricingStrategy(Strategy):
         if abs(divergence) < self.min_divergence:
             return []
 
-        # Orderflow confirmation: the book and micro-momentum must agree with the
-        # direction of the mispricing.
+        # Orderflow confirmation: the book and micro-momentum should agree with the
+        # direction of the mispricing. A LARGE divergence (>=5%) overrides a flat
+        # orderflow (choppy markets where micro-acceleration ~ 0), so a genuine
+        # N(d2) vs market mispricing still trades instead of being filtered to nothing.
         orderflow = ctx.book_imbalance + ctx.micro_acceleration
+        strong = abs(divergence) >= 0.05
         snapshot = self.rule.snapshot(ctx.features())
 
         decisions: list[StrategyDecision] = []
-        if divergence > 0 and orderflow > 0:
+        if divergence > 0 and (orderflow > 0 or strong):
             # Market underprices the up contract; buy it.
             decisions.append(StrategyDecision(
                 strategy=self.name,
@@ -61,17 +64,20 @@ class IvMispricingStrategy(Strategy):
                 ev_estimate=divergence,
                 rule_snapshot=snapshot,
             ))
-        elif divergence < 0 and orderflow < 0:
-            # Market overprices the up contract; sell it (short up).
+        elif divergence < 0 and (orderflow < 0 or strong):
+            # Market overprices the up contract. Instead of shorting YES (which
+            # needs USDC margin the account doesn't have), buy the NO leg — the
+            # economically identical "down" bet that only costs USD.
+            down_ask = 1.0 - ctx.best_bid
             decisions.append(StrategyDecision(
                 strategy=self.name,
-                side="up",
-                action="sell",
-                price=ctx.best_bid,
+                side="down",
+                action="buy",
+                price=round(down_ask, 2),
                 size=5.0,
                 order_type="taker",
                 reason="IV arb: market overpriced vs N(d2)",
-                prob_estimate=ctx.option_implied_prob,
+                prob_estimate=1.0 - ctx.option_implied_prob,
                 ev_estimate=-divergence,
                 rule_snapshot=snapshot,
             ))

@@ -32,7 +32,7 @@ async def test_kalshi(settings) -> bool:
     from btc_edge.connectors.kalshi_client import (
         KalshiClient,
         build_kalshi_signer_from_env,
-        resolve_btc_markets,
+        resolve_btc_15m_market,
     )
 
     signer = build_kalshi_signer_from_env()
@@ -41,13 +41,12 @@ async def test_kalshi(settings) -> bool:
         return False
     client = KalshiClient(signer, settings.kalshi.active_base_url)
     markets = await client.get_btc_markets()
-    btc = await _btc_price()
-    above, _below = resolve_btc_markets(markets, btc)
-    if above is None:
-        print("Kalshi: no active above-strike market found near BTC price")
+    market = resolve_btc_15m_market(markets)
+    if market is None:
+        print("Kalshi: no active KXBTC15M window found")
         return False
-    ticker = above["ticker"]
-    print(f"Kalshi test: BUY 1 YES @ $0.01 on {ticker} (BTC ${btc:,.0f})")
+    ticker = market["ticker"]
+    print(f"Kalshi test: BUY 1 YES @ $0.01 on {ticker}")
     resp = await client.place_order(ticker=ticker, side="yes", action="buy", count=1, price=0.01)
     print("Kalshi response:", resp)
     return True

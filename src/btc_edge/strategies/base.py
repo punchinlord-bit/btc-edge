@@ -29,6 +29,7 @@ class MarketContext:
     asks: list[tuple[float, float]] = field(default_factory=list)
     realized_vol: float = 0.0
     implied_vol: float = 0.0
+    brti_lead: float = 0.0  # Kalshi synthetic BRTI - Polymarket Chainlink (dollars)
 
     @property
     def best_bid(self) -> float:
@@ -72,6 +73,11 @@ class StrategyDecision:
     prob_estimate: float
     ev_estimate: float
     rule_snapshot: dict[str, Any] = field(default_factory=dict)
+    # For sell-to-close decisions: the matched long's entry price/fee, so the
+    # router can realize (exit - entry) P&L immediately instead of settling the
+    # close against the window outcome as if it were a fresh short.
+    entry_price: float | None = None
+    entry_fee: float = 0.0
 
 
 class Strategy(ABC):

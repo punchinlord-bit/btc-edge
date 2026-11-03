@@ -1,16 +1,21 @@
 trading:
-  mode: "paper"                 # MUST default to "paper". Live via BTC_EDGE_MODE=live + ALLOW_LIVE_TRADING=TRUE.
+  mode: "live"                   # live-only; paper mode has been removed. Gated by ALLOW_LIVE_TRADING=TRUE.
   base_currency: "USD"
   bankroll: 20.0                # conservative baseline (auto-scales to live balance in live mode)
   max_daily_loss_pct: 10.0      # circuit breaker: halt if daily loss exceeds this % of bankroll ($2 on $20)
-  quarter_kelly_cap_pct: 2.8    # per-trade max risk (Kalshi), ~40% larger; Polymarket uses its own cap
-  max_exposure_pct: 35.0        # total open notional (per venue) cap, % of live balance — "don't burn the bankroll"
+  quarter_kelly_cap_pct: 15.0   # per-trade max risk (Kalshi), % of live balance; Polymarket uses its own cap
+  max_exposure_pct: 50.0        # total open notional (per venue) cap, % of live balance — "don't burn the bankroll"
   polymarket_cap_pct: 1.0       # tighter per-trade Kelly cap
-  polymarket_exposure_pct: 100.0 # total Polymarket open notional cap, % of live balance
-  min_ev_threshold: 0.01        # minimum expected-value edge (net of fees) before firing
+  polymarket_exposure_pct: 20.0  # total Polymarket open notional cap, % of live balance (frugal: PM never drunk-bets the bankroll)
+  polymarket_max_contract_price: 0.60  # Polymarket hard price ceiling (60c): only enter cheap, never 70-90c
+  min_ev_threshold: 0.02        # minimum expected-value edge (net of fees) before firing
   chase_guard_pct: 0.1          # don't buy a side that already moved >0.1% this window (anti-chase)
-  entry_warmup_seconds: 60.0    # stay flat for the first 60s of a window (let info develop)
+  entry_warmup_seconds: 90.0    # hard entry block: stay flat for the first 90s of a window
   take_profit_pct: 85.0         # auto-sell a position once it's up 85% (then re-enter if edge remains)
+  certainty_all_in_pct: 50.0    # near-certain all-in: when the late-scalp fires at 93-97c with the
+                                # model >=97% confident, size up to this % of the live balance
+                                # (NOT 100% — a single tail loss must never wipe the bankroll)
+  llm_gates: false              # false = skip Ollama+DeepSeek (they add ~2s/tick AND veto everything); deterministic gates keep safety
 
 polymarket:
   gamma_api_url: "https://gamma-api.polymarket.com"
@@ -49,25 +54,26 @@ strategies:
   late_scalp:
     enabled: true
     min_time_remaining: 10
-    max_time_remaining: 120
-    min_prob: 0.70
+    max_time_remaining: 30     # only the final 30s (near-certain + safe)
+    min_prob: 0.93             # near-certain only (93-98c), NOT the 70-90c lock trap
     max_prob: 0.98
     min_window_delta_pct: 0.02
   market_maker:
-    enabled: true
+    enabled: false   # disabled: its post-only maker orders rest unfilled on Kalshi and lock exposure
     min_time_remaining: 120
     levels: 1
     min_spread: 0.02
     refresh_seconds: 60
     spot_move_pct: 0.03
+    min_edge: 0.02
   crowd_follow:
-    enabled: true
+    enabled: false   # disabled: 0% win rate — buying the popular side is anti-predictive
     min_time_remaining: 180
     max_time_remaining: 300
     min_contract_price: 0.55
   iv_mispricing:
     enabled: true
-    min_divergence: 0.02
+    min_divergence: 0.02   # keep above the ~2-4% Kalshi taker fee so entries stay net-EV
 
 ml:
   trailing_window: 200
@@ -104,6 +110,16 @@ database:
 web:
   host: "0.0.0.0"
   port: 8080
+
+ollama:
+  endpoint: "http://127.0.0.1:11434/api/chat"
+  model: "qwen2.5-coder:7b-instruct-q4_K_M"
+  num_ctx: 512
+  num_predict: 3
+  temperature: 0.0
+  num_gpu: 99            # 99 = offload every layer to GPU
+  keep_alive: "-1"       # -1 = keep resident forever; "0" = unload; or "5m"/"30s"
+  timeout_seconds: 2.0   # hard cap per verdict (7B needs ~0.7-2.0s)
 
 logging:
   level: "INFO"

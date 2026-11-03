@@ -52,20 +52,51 @@ class MarketResolution:
     end_date: str = ""
     question: str = ""
 
+    def _outcome_index(self, target: str) -> int | None:
+        """Index of the "up" or "down" outcome by matching its string label.
+
+        Polymarket's ``outcomes`` array order is NOT guaranteed to be
+        ``["Up", "Down"]`` — market-creation scripts vary. Hardcoding index 0 as
+        "Up" is exactly the inversion bug that reads the Down token as Up and
+        computes a phantom ~46% edge. Match by label instead.
+        """
+        for i, o in enumerate(self.outcomes):
+            label = str(o).strip().lower()
+            if target == "up" and label in ("up", "yes", "higher", "over", "above", "upward"):
+                return i
+            if target == "down" and label in ("down", "no", "lower", "under", "below", "downward"):
+                return i
+        return None
+
     @property
     def up_token_id(self) -> str:
-        return self.token_ids[0] if self.token_ids else ""
+        i = self._outcome_index("up")
+        return self.token_ids[i] if i is not None and i < len(self.token_ids) else ""
 
     @property
     def down_token_id(self) -> str:
-        return self.token_ids[1] if len(self.token_ids) > 1 else ""
+        i = self._outcome_index("down")
+        return self.token_ids[i] if i is not None and i < len(self.token_ids) else ""
 
     def price_of(self, outcome: str) -> float:
-        outcome = outcome.lower()
-        for i, o in enumerate(self.outcomes):
-            if o.lower() == outcome and i < len(self.outcome_prices):
-                return self.outcome_prices[i]
+        i = self._outcome_index(outcome.strip().lower())
+        if i is not None and i < len(self.outcome_prices):
+            return self.outcome_prices[i]
         return 0.0
+
+    @property
+    def up_price(self) -> float | None:
+        i = self._outcome_index("up")
+        if i is not None and i < len(self.outcome_prices):
+            return self.outcome_prices[i]
+        return None
+
+    @property
+    def down_price(self) -> float | None:
+        i = self._outcome_index("down")
+        if i is not None and i < len(self.outcome_prices):
+            return self.outcome_prices[i]
+        return None
 
 
 class GammaClient:
@@ -271,10 +302,28 @@ class PolymarketCLOBWS:
                         "assets_ids": [self.token_id],
                     }
                     await ws.send(json.dumps(sub))
-                    async for raw in ws:
-                        self.last_message_ts = time.time()
-                        msg = json.loads(raw)
-                        on_book(msg)
+                    self.last_message_ts = time.time()
+
+                    async def _heartbeat() -> None:
+                        # Polymarket silently stops pushing book updates after
+                        # ~10-15s without an explicit ping. Ping every 10s so the
+                        # stream never goes quiet; on failure the outer loop
+                        # reconnects.
+                        while True:
+                            await asyncio.sleep(10.0)
+                            try:
+                                await ws.ping()
+                            except Exception:  # noqa: BLE001 - trigger reconnect
+                                return
+
+                    hb = asyncio.create_task(_heartbeat())
+                    try:
+                        async for raw in ws:
+                            self.last_message_ts = time.time()
+                            msg = json.loads(raw)
+                            on_book(msg)
+                    finally:
+                        hb.cancel()
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Polymarket CLOB WS error: %s; reconnecting", exc)
                 await asyncio.sleep(1.0)
@@ -349,13 +398,18 @@ class PolymarketUSClient:
     def resolve_15m(self, now_ts: float | None = None) -> dict[str, Any]:
         """Resolve the current 15m market: slug + best bid/ask/mid (best-effort)."""
         slug = btc_updown_15m_slug(now_ts)
-        out: dict[str, Any] = {"slug": slug, "bid": None, "ask": None, "mid": None}
+        out: dict[str, Any] = {"slug": slug, "bid": None, "ask": None, "mid": None, "spread": None}
         try:
             bbo = self.client.markets.bbo(slug)
             data = bbo.get("marketData") or {}
-            out["bid"] = self._px(data.get("bestBid"))
-            out["ask"] = self._px(data.get("bestAsk"))
+            bid = self._px(data.get("bestBid"))
+            ask = self._px(data.get("bestAsk"))
+            out["bid"] = bid
+            out["ask"] = ask
             out["mid"] = self._px(data.get("currentPx"))
+            # Spread = ask - bid; a wide spread means the midpoint is spoofed/thin.
+            if bid is not None and ask is not None:
+                out["spread"] = round(ask - bid, 4)
         except Exception as exc:  # noqa: BLE001 - market reads are best-effort
             logger.debug("Polymarket US bbo unavailable: %s", exc)
         return out
@@ -392,19 +446,29 @@ class PolymarketUSClient:
             end_date = resolution.end_date
             reference_source = resolution.resolution_source
             question = resolution.question
-            if len(resolution.outcome_prices) >= 2:
+            # Match up/down by outcome LABEL (not index) so a ["Down","Up"]
+            # outcomes array can't invert the probabilities.
+            up_price = resolution.up_price
+            down_price = resolution.down_price
+            if up_price is None and down_price is None and resolution.outcome_prices:
                 up_price = resolution.outcome_prices[0]
-                down_price = resolution.outcome_prices[1]
-            elif resolution.outcome_prices:
-                up_price = resolution.outcome_prices[0]
+                down_price = (
+                    resolution.outcome_prices[1]
+                    if len(resolution.outcome_prices) > 1
+                    else None
+                )
 
         # Gamma outcome prices are the authoritative, always-current market
         # probability. The BBO currentPx can be stale (it reports the expired
         # window's settled price right at rollover), so prefer Gamma and fall
         # back through the live book only when Gamma is unavailable.
+        # Wide-spread guard: a >8c ask-bid gap means the midpoint is spoofed or
+        # the book is illiquid — never trust it as a probability signal.
+        spread = bbo.get("spread")
+        bbo_mid = bbo.get("mid") if not (spread is not None and spread > 0.08) else None
         prob_up = up_price
         if prob_up is None:
-            prob_up = bbo.get("mid")
+            prob_up = bbo_mid
         if prob_up is None:
             prob_up = bbo.get("ask")
         if prob_up is None:
@@ -414,8 +478,8 @@ class PolymarketUSClient:
             "slug": et_slug,
             "gamma_slug": gamma_slug,
             "condition_id": condition_id,
-            "up_token_id": token_ids[0] if token_ids else "",
-            "down_token_id": token_ids[1] if len(token_ids) > 1 else "",
+            "up_token_id": resolution.up_token_id if resolution is not None else "",
+            "down_token_id": resolution.down_token_id if resolution is not None else "",
             "outcomes": outcomes,
             "up": up_price,
             "down": down_price,
@@ -423,6 +487,7 @@ class PolymarketUSClient:
             "bid": bbo.get("bid"),
             "ask": bbo.get("ask"),
             "mid": bbo.get("mid"),
+            "spread": spread,
             "open_strike": None,
             "reference_source": reference_source,
             "end_date": end_date,
@@ -436,10 +501,12 @@ class PolymarketUSClient:
         self, slug: str, side: str, action: str, price: float, size: float, is_maker: bool
     ) -> Any:
         intent = _order_intent(side, action)
-        # ``price`` is the decision's YES ("up") price in [0,1]; short (down)
-        # orders trade the NO leg at 1 - yes_price.
-        px = price if side == "up" else (1.0 - price)
-        px = max(0.01, min(0.99, round(px, 2)))
+        # ``price`` is already the LEG'S OWN price: YES price for "up" decisions and
+        # NO price for "down" decisions (the strategies set d.price that way). The
+        # SDK's intent already encodes which leg is traded, so pass the price
+        # through unchanged. (The old ``1 - price`` for "down" double-converted a NO
+        # price into a YES price, which inverted exits into buys.)
+        px = max(0.01, min(0.99, round(price, 2)))
         quantity = max(1, int(round(size)))
         tif = "TIME_IN_FORCE_GOOD_TILL_CANCEL" if is_maker else "TIME_IN_FORCE_IMMEDIATE_OR_CANCEL"
         params = {
@@ -489,6 +556,10 @@ class PolymarketUSClient:
         self, slug: str, side: str, action: str, price: float, size: float, is_maker: bool = False
     ) -> Any:
         return await asyncio.to_thread(self._place_order_sync, slug, side, action, price, size, is_maker)
+
+    async def cancel_all(self) -> Any:
+        """Cancel all open orders (clears stale resting quotes on window rollover)."""
+        return await asyncio.to_thread(self.client.orders.cancel_all)
 
     def _balance_sync(self) -> float:
         bal = self.client.account.balances()

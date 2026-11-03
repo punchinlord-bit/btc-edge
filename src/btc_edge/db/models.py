@@ -221,6 +221,65 @@ class Btc15mWindowEvaluation(Base):
     created_at: Mapped[float] = mapped_column(Float, default=utcnow_ts)
 
 
+class WindowOutcome(Base):
+    """Resolved 15m BTC window outcomes, one row per UTC quarter-hour.
+
+    Stores both venues' strikes/closes/outcomes plus the model's probability and
+    Brier term so the nightly analyzer and dashboard can load history in <2ms
+    without re-fetching exchange APIs.
+    """
+
+    __tablename__ = "window_outcomes"
+
+    window_start_ts: Mapped[int] = mapped_column(Integer, primary_key=True)
+    kalshi_strike: Mapped[float | None] = mapped_column(Float, nullable=True)
+    kalshi_close: Mapped[float | None] = mapped_column(Float, nullable=True)
+    kalshi_outcome: Mapped[str | None] = mapped_column(String(8), nullable=True)  # up | down
+    poly_strike: Mapped[float | None] = mapped_column(Float, nullable=True)
+    poly_close: Mapped[float | None] = mapped_column(Float, nullable=True)
+    poly_outcome: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    model_prob_up: Mapped[float | None] = mapped_column(Float, nullable=True)
+    brier_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    regime: Mapped[str] = mapped_column(String(8), default="trend")
+
+
+class BotTrade(Base):
+    """One bot order (open, filled, cancelled, or settled) in the brain ledger."""
+
+    __tablename__ = "bot_trades"
+
+    trade_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    venue: Mapped[str] = mapped_column(String(16), index=True)
+    window_start_ts: Mapped[int] = mapped_column(Integer, index=True)
+    placed_at: Mapped[float] = mapped_column(Float, default=utcnow_ts)
+    dir: Mapped[str] = mapped_column(String(8))  # up | down
+    entry_cents: Mapped[int] = mapped_column(Integer, default=0)
+    contracts: Mapped[float] = mapped_column(Float, default=0.0)
+    btc_price_at_entry: Mapped[float | None] = mapped_column(Float, nullable=True)
+    status: Mapped[str] = mapped_column(String(16), default="open")
+    settled_pnl_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
+    won: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    __table_args__ = (
+        Index("ix_bot_trades_venue_window", "venue", "window_start_ts"),
+    )
+
+
+class VenueRollup(Base):
+    """Pre-aggregated per-venue balance / win-loss / P&L cache (fast dashboard reads)."""
+
+    __tablename__ = "venue_rollups"
+
+    venue: Mapped[str] = mapped_column(String(16), primary_key=True)
+    balance_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
+    wins: Mapped[int] = mapped_column(Integer, default=0)
+    losses: Mapped[int] = mapped_column(Integer, default=0)
+    win_rate: Mapped[float] = mapped_column(Float, default=0.0)
+    total_pnl_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    last_bet_json: Mapped[str] = mapped_column(Text, default="{}")
+    updated_at: Mapped[float] = mapped_column(Float, default=utcnow_ts)
+
+
 # Re-export helpers
 def current_ts() -> float:
     return time.time()

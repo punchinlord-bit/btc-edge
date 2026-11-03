@@ -140,6 +140,9 @@ class LiveMarketFeed:
             "prob_up": prob,
             "prob_down": (1.0 - prob) if prob is not None else None,
             "close_time": _parse_ts(m.get("close_time")),
+            "open_time": _parse_ts(m.get("open_time")),
+            # The BRTI reference at window open (how KXBTC15M actually settles).
+            "floor_strike": m.get("floor_strike"),
         }
 
     async def refresh_once(self) -> None:
@@ -172,7 +175,7 @@ class LiveMarketFeed:
 
         self.state.feed_updated_at = now
 
-    async def run(self, interval: float = 3.0) -> None:
+    async def run(self, interval: float = 1.0) -> None:
         while True:
             try:
                 await self.refresh_once()

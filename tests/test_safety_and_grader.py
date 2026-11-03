@@ -25,15 +25,13 @@ from btc_edge.strategies.base import StrategyDecision
 
 # ------------------------------------------------------------------ config
 
-def test_config_defaults_to_paper():
+def test_config_defaults_to_live():
     s = load_settings()
-    assert s.trading.mode == "paper"
-    assert not s.live_trading_allowed()
+    assert s.trading.mode == "live"
 
 
-def test_live_requires_both_checks(monkeypatch):
+def test_live_requires_allow_flag(monkeypatch):
     s = load_settings()
-    s.trading.mode = "live"
     monkeypatch.delenv("ALLOW_LIVE_TRADING", raising=False)
     assert not s.live_trading_allowed()
     monkeypatch.setenv("ALLOW_LIVE_TRADING", "TRUE")
@@ -48,9 +46,16 @@ def test_kelly_fraction():
 
 
 def test_quarter_kelly_capped():
+    # Quarter-Kelly: 0.25 * ((0.6 - 0.5) / 0.5) * 10000 = 500 (under the 10% cap).
     size = quarter_kelly_size(prob=0.6, price=0.5, bankroll=10000.0, cap_pct=10.0)
-    # 0.35 * ((0.6 - 0.5) / 0.5) * 10000 = 700, below the 10% cap (1000).
-    assert size == pytest.approx(700.0, rel=1e-6)
+    assert size == pytest.approx(500.0, rel=1e-6)
+    # The hard survival cap: a huge edge is still capped at 5% of bankroll.
+    capped = quarter_kelly_size(prob=0.99, price=0.50, bankroll=10000.0, cap_pct=5.0)
+    assert capped == pytest.approx(500.0, rel=1e-6)
+
+
+def test_quarter_kelly_zero_on_no_edge():
+    assert quarter_kelly_size(prob=0.4, price=0.5, bankroll=10000.0) == 0.0
 
 
 def test_trading_config_conservative_defaults():
@@ -59,7 +64,7 @@ def test_trading_config_conservative_defaults():
     capped. These are the knobs behind the 'don't burn the bankroll' behavior."""
     cfg = TradingConfig()
     assert cfg.bankroll == 20.0
-    assert cfg.quarter_kelly_cap_pct == 2.0
+    assert cfg.quarter_kelly_cap_pct == 15.0
     assert cfg.max_exposure_pct == 35.0
     assert cfg.max_daily_loss_pct == 5.0
     # Polymarket is tuned tighter (more volatile).
@@ -74,37 +79,36 @@ def test_quarter_kelly_small_cap_pct():
     assert size == pytest.approx(0.20, rel=1e-6)
 
 
-def test_router_paper_mode_no_live():
+def test_router_routes_live():
     s = load_settings()
     router = Router(s)
-    assert not router.live_allowed
     decision = StrategyDecision(
         strategy="late_scalp", side="up", action="buy", price=0.9, size=5.0,
         order_type="taker", reason="test", prob_estimate=0.95, ev_estimate=0.04,
     )
     order = router.route(decision, venue="polymarket", outcome=1.0)
-    assert not order.routed_live
+    assert order.routed_live  # paper mode removed — positive-size orders route live
     assert order.status == "filled"
 
 
-def test_size_for_allows_min_up_to_third_of_account():
-    """The 5-share Polymarket minimum is allowed as long as its notional stays
-    within ~35% of the account, so small accounts keep trading without a single
-    order betting the whole balance."""
+def test_size_for_clamps_notional_and_skips_no_edge():
+    """`size_for` returns at least the 5-share Polymarket minimum when there is
+    positive edge (clamping the notional to the $0.50-$1.15 window), and skips a
+    zero/negative-edge order entirely. The total-account-exposure cap is enforced
+    separately in the trading loop."""
     s = load_settings()
     router = Router(s)
 
-    # $7 account, 35% = $2.45; 5 shares @ 0.48 = $2.40 <= $2.45 -> allowed.
     d = StrategyDecision(
         strategy="market_maker", side="up", action="buy", price=0.48, size=5.0,
         order_type="taker", reason="test", prob_estimate=0.55, ev_estimate=0.05,
     )
     assert router.size_for(d, venue="polymarket", bankroll=7.0) == 5.0
 
-    # 5 shares @ 0.90 = $4.50 > $2.45 -> skip (would be > 1/3 of the account).
+    # No edge (prob <= price) -> skipped.
     d2 = StrategyDecision(
         strategy="market_maker", side="up", action="buy", price=0.90, size=5.0,
-        order_type="taker", reason="test", prob_estimate=0.95, ev_estimate=0.05,
+        order_type="taker", reason="test", prob_estimate=0.85, ev_estimate=-0.05,
     )
     assert router.size_for(d2, venue="polymarket", bankroll=7.0) == 0.0
 
@@ -130,6 +134,14 @@ def test_safety_daily_loss_breach():
     assert w.daily_loss_limit_breached()
     assert w.check_and_halt([])
     assert w.state.halted
+
+
+def test_safety_startup_grace_skips_health_check():
+    """During startup grace, a missing heartbeat must NOT fire an emergency flush."""
+    w = SafetyWatchdog(bankroll=10000.0)
+    # No heartbeat recorded, but we're within the 60s grace -> no halt/flush.
+    assert w.check_and_halt(["coinbase"]) is False
+    assert not w.state.halted
 
 
 # ------------------------------------------------------------------- grader
@@ -201,9 +213,9 @@ def test_ensemble_fallback_and_learning():
 def test_calibrate_no_history_defers_to_market():
     ens = ProbabilityEnsemble()
     # No resolved windows yet -> the model is unproven -> max market shrinkage.
-    assert ens.shrinkage_weight() == pytest.approx(0.9)
+    assert ens.shrinkage_weight() == pytest.approx(0.6)
     out = ens.calibrate(0.6, 0.4)
-    assert out == pytest.approx(0.1 * 0.6 + 0.9 * 0.4)
+    assert out == pytest.approx(0.4 * 0.6 + 0.6 * 0.4)
 
 
 def test_shrinkage_weight_rewards_model_skill():
@@ -216,7 +228,7 @@ def test_shrinkage_weight_rewards_model_skill():
     # skill = 1.0, damped by the prior n/(n+20) = 10/30 -> w = max - (1/3)*span.
     w = ens.shrinkage_weight()
     assert w < ens.max_shrink
-    assert w == pytest.approx(0.9 - (10.0 / 30.0) * (0.9 - 0.3), abs=0.01)
+    assert w == pytest.approx(0.6 - (10.0 / 30.0) * (0.6 - 0.3), abs=0.01)
 
 
 def test_shrinkage_weight_penalizes_worse_model():
@@ -226,7 +238,7 @@ def test_shrinkage_weight_penalizes_worse_model():
     ens._hist_pred = [0.5] * 10
     ens._hist_market = [0.7, 0.3, 0.7, 0.3, 0.7, 0.3, 0.7, 0.3, 0.7, 0.3]
     ens._history_y = [1, 0, 1, 0, 1, 0, 1, 0, 1, 0]
-    assert ens.shrinkage_weight() == pytest.approx(0.9)
+    assert ens.shrinkage_weight() == pytest.approx(0.6)
 
 
 # --------------------------------------------------------------------- db

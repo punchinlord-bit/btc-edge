@@ -19,10 +19,16 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# Fallback paper bankroll when the Kalshi API returns no/zero balance.
+KALSHI_STARTING_BANKROLL = 500.0
+
 
 @dataclass(slots=True)
 class PortfolioSnapshot:
     balance: float | None = None
+    equity_usd: float | None = None
+    auth_status: str = "ok"
+    balance_source: str = "api"
     venue_stats: dict[str, Any] = field(default_factory=dict)
     recent_trades: list[dict[str, Any]] = field(default_factory=list)
     trade_totals: dict[str, float] = field(default_factory=dict)
@@ -56,18 +62,32 @@ def _normalize_price(value: Any) -> float:
     return p / 100.0 if p > 1.5 else p
 
 
+def _is_auth_error(exc: Exception) -> bool:
+    """True when an HTTP error is a 401/403 (bad signature / key)."""
+    resp = getattr(exc, "response", None)
+    return resp is not None and getattr(resp, "status_code", 0) in (401, 403)
+
+
 async def poll_kalshi(client: Any, ticker: str | None = None, limit: int = 200) -> PortfolioSnapshot:
     """Fetch and normalize the Kalshi account (balance, fills, settlements, positions)."""
     snap = PortfolioSnapshot()
     try:
         data = await client.get_balance()
-        dollars = data.get("balance_dollars")
-        if dollars is not None:
-            snap.balance = _dollars(dollars)
+        # Kalshi /portfolio/balance returns ``balance`` (available cash) and
+        # ``portfolio_value`` (open positions) — both integer cents. Convert both.
+        cash_cents = data.get("balance")
+        if cash_cents is not None:
+            cash_usd = _dollars(cash_cents, cents=True)
+            equity_usd = cash_usd + _dollars(data.get("portfolio_value"), cents=True)
+            snap.balance = cash_usd  # available cash — what new orders size against
+            snap.equity_usd = equity_usd
         else:
-            pv = data.get("portfolio_value") or data.get("balance")
-            snap.balance = _dollars(pv, cents=True) if pv is not None else None
+            # Legacy/fallback field shapes (balance_dollars or portfolio_value).
+            dollars = data.get("balance_dollars")
+            snap.balance = _dollars(dollars) if dollars is not None else None
     except Exception as exc:  # noqa: BLE001
+        if _is_auth_error(exc):
+            snap.auth_status = "auth_error"
         logger.warning("Kalshi balance poll failed: %s", exc)
 
     # Filled orders (paginate via cursor).
@@ -126,10 +146,29 @@ async def poll_kalshi(client: Any, ticker: str | None = None, limit: int = 200) 
     wins = 0
     losses = 0
     for s in settlements:
-        pnl = _dollars(s.get("realized_pnl"), cents=True)
+        # Kalshi /portfolio/settlements carries ``revenue`` (payout, integer cents)
+        # plus the per-side cost basis. The fixed-point API exposes the cost basis
+        # as ``yes_total_cost_dollars`` / ``no_total_cost_dollars`` (dollar strings);
+        # fall back to the legacy integer-cent fields if the new ones are absent.
+        revenue = _dollars(s.get("revenue"), cents=True)
+        yes_cost = s.get("yes_total_cost_dollars")
+        no_cost = s.get("no_total_cost_dollars")
+        if yes_cost is None and no_cost is None:
+            cost = _dollars(s.get("yes_total_cost"), cents=True) + _dollars(s.get("no_total_cost"), cents=True)
+        else:
+            cost = _dollars(yes_cost) + _dollars(no_cost)
+        if cost <= 0:
+            continue
+        pnl = revenue - cost
         realized += pnl
         wins += 1 if pnl > 0 else 0
         losses += 1 if pnl < 0 else 0
+
+    # Kalshi balance fallback: if the API returned no/zero cash, anchor to a paper
+    # bankroll + realized P&L so the tally NEVER shows blank/zero.
+    if snap.balance is None or snap.balance <= 0:
+        snap.balance = max(0.0, KALSHI_STARTING_BANKROLL + realized)
+        snap.balance_source = "ledger"
 
     snap.venue_stats = {
         "notional_usd": notional,
@@ -137,6 +176,9 @@ async def poll_kalshi(client: Any, ticker: str | None = None, limit: int = 200) 
         "trades": len(fills),
         "wins": wins,
         "losses": losses,
+        "balance_usd": snap.balance,
+        "equity_usd": snap.equity_usd,
+        "balance_source": snap.balance_source,
     }
     snap.trade_totals = {
         "total_trades": float(len(fills)),

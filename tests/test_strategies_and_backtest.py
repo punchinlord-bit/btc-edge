@@ -69,19 +69,34 @@ def test_market_maker_quotes_three_levels():
     assert all(d.order_type == "maker" and d.action == "buy" for d in decisions)
 
 
-def test_market_maker_stands_aside_on_down():
+def test_market_maker_buys_down_when_model_says_down():
     strat = MarketMakerStrategy()
     ctx = make_context(time_remaining=200.0, contract_price=0.50, regime="DAMPENING", prob_estimate=0.40)
-    assert strat.evaluate(ctx) == []
+    decisions = strat.evaluate(ctx)
+    assert len(decisions) == 3  # now buys the "down" side (NO) instead of standing aside
+    assert all(d.side == "down" and d.action == "buy" for d in decisions)
 
 
 def test_market_maker_kalshi_buy_only():
     strat = MarketMakerStrategy()
-    ctx = make_context(venue="kalshi", time_remaining=200.0, contract_price=0.50, regime="DAMPENING")
+    # Model thinks "up" is 0.60 while the market prices it 0.50 -> edge on "up".
+    ctx = make_context(venue="kalshi", time_remaining=200.0, contract_price=0.50,
+                       regime="DAMPENING", prob_estimate=0.60)
     decisions = strat.evaluate(ctx)
-    assert len(decisions) == 3  # 3 taker buys (Kalshi: GTC maker needs USDC margin)
+    assert len(decisions) == 3  # 3 post-only maker bids below the model's fair
     assert all(d.action == "buy" for d in decisions)
-    assert all(d.order_type == "taker" for d in decisions)
+    assert all(d.order_type == "maker" for d in decisions)
+    assert all(d.side == "up" for d in decisions)
+    # Bids must be BELOW the model's own fair (0.60), never above it.
+    assert all(d.price < 0.60 for d in decisions)
+
+
+def test_market_maker_stands_aside_without_edge():
+    strat = MarketMakerStrategy()
+    # Model agrees with the market (0.505 vs 0.50) -> no edge -> stand aside.
+    ctx = make_context(venue="kalshi", time_remaining=200.0, contract_price=0.50,
+                       regime="DAMPENING", prob_estimate=0.505)
+    assert strat.evaluate(ctx) == []
 
 
 def test_market_maker_inactive_early():
@@ -125,6 +140,17 @@ def test_iv_mispricing_no_divergence():
     strat = IvMispricingStrategy(min_divergence=0.045)
     ctx = make_context(contract_price=0.50, option_implied_prob=0.51)
     assert strat.evaluate(ctx) == []
+
+
+def test_iv_mispricing_fires_in_trending_regime():
+    strat = IvMispricingStrategy(min_divergence=0.045)
+    # The N(d2) vs market divergence is the signal; a trending regime no longer
+    # suppresses it (orderflow confirmation still applies).
+    ctx = make_context(
+        contract_price=0.50, option_implied_prob=0.60,
+        book_imbalance=0.5, micro_acceleration=0.5, regime="AMPLIFYING",
+    )
+    assert any(d.side == "up" and d.action == "buy" for d in strat.evaluate(ctx))
 
 
 # ------------------------------------------------------------- backtester

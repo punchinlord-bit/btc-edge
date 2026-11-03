@@ -1,8 +1,7 @@
-"""Execution router: paper simulator and live routing with Quarter-Kelly sizing.
+"""Execution router: live routing with Quarter-Kelly sizing.
 
-Live order routing is physically blocked behind a dual check:
-``config.trading.mode == "live"`` AND ``ALLOW_LIVE_TRADING == "TRUE"``. In paper
-mode all decisions are simulated locally and recorded for grading.
+Live order routing is gated behind ``ALLOW_LIVE_TRADING == "TRUE"``. Paper mode
+has been removed — there is no local simulation path.
 """
 
 from __future__ import annotations
@@ -10,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import math
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -19,6 +19,11 @@ from btc_edge.config import Settings
 from btc_edge.strategies.base import StrategyDecision
 
 logger = logging.getLogger(__name__)
+
+# Hard per-order dollar floor/ceiling so a tiny-balance account still bets a
+# meaningful $0.50–$1.15 instead of a useless $0.10 clamp.
+MIN_ORDER_USD = 0.50
+MAX_ORDER_USD = 1.15
 
 
 def idempotency_key(
@@ -53,9 +58,27 @@ def kelly_fraction(prob: float, price: float) -> float:
     return (prob - price) / (1.0 - price)
 
 
-def quarter_kelly_size(prob: float, price: float, bankroll: float, cap_pct: float = 10.0) -> float:
-    """Dollar size for a fractional-Kelly position capped at ``cap_pct``% of bankroll."""
-    fraction = 0.35 * kelly_fraction(prob, price)
+def quarter_kelly_size(prob: float, price: float, bankroll: float, cap_pct: float = 5.0) -> float:
+    """Quarter-Kelly dollar size with a hard survival cap.
+
+    ``kellyFraction = (prob - price) / (1 - price)``; the bet is
+    ``min(0.05, max(0, kellyFraction * 0.25))`` of bankroll — never risk more than
+    5% of bankroll on a single 15m window. A zero/negative edge sizes to zero.
+    """
+    fraction = 0.25 * kelly_fraction(prob, price)
+    if fraction <= 0:
+        return 0.0
+    fraction = min(cap_pct / 100.0, fraction)  # cap_pct default 5.0 -> 0.05
+    return fraction * bankroll
+
+
+def full_kelly_size(prob: float, price: float, bankroll: float, cap_pct: float = 100.0) -> float:
+    """Dollar size for a FULL-Kelly position capped at ``cap_pct``% of bankroll.
+
+    Used by "gusto" recovery mode, where the 0.35 fractional-Kelly discount and
+    the tight per-trade cap are lifted so each win moves a small balance hard.
+    """
+    fraction = kelly_fraction(prob, price)
     if fraction <= 0:
         return 0.0
     dollar_size = fraction * bankroll
@@ -82,8 +105,6 @@ class Router:
         self.kalshi_client = kalshi_client
         self.poly_client = poly_client
         self.orders: list[RoutedOrder] = []
-        self._paper_pnl = 0.0
-        self._paper_fees = 0.0
         self._last_kalshi_convert_ts = 0.0
 
     @property
@@ -91,12 +112,20 @@ class Router:
         return self.settings.live_trading_allowed()
 
     def size_for(
-        self, decision: StrategyDecision, venue: str | None = None, bankroll: float | None = None
+        self,
+        decision: StrategyDecision,
+        venue: str | None = None,
+        bankroll: float | None = None,
+        gusto: bool = False,
     ) -> float:
         """Compute the Quarter-Kelly position size for a decision.
 
         ``bankroll`` defaults to the configured value, but the live loop passes the
         *actual* wallet balance so sizing always scales with the money in the account.
+
+        When ``gusto`` is set for a Polymarket order, the conservative per-trade
+        cap, the 0.35 fractional-Kelly discount, and the extreme-price guard are
+        lifted so a low balance can be ground back up with full-Kelly recovery bets.
         """
         br = bankroll if (bankroll is not None and bankroll > 0) else self.settings.trading.bankroll
         v = venue or _venue(decision, self.settings)
@@ -105,12 +134,13 @@ class Router:
         # only applies to opening buys).
         if decision.action == "sell":
             return max(0.0, decision.size)
+        gusto_pm = gusto and v == "polymarket"
         # Polymarket gets a tighter per-trade cap: it is more volatile and its
         # 5-share minimum is a bigger slice of a small account than Kalshi's
-        # 1-contract minimum.
+        # 1-contract minimum. Gusto lifts that cap entirely (full bankroll).
         cap_pct = self.settings.trading.quarter_kelly_cap_pct
         if v == "polymarket":
-            cap_pct = self.settings.trading.polymarket_cap_pct
+            cap_pct = 100.0 if gusto_pm else self.settings.trading.polymarket_cap_pct
         prob = decision.prob_estimate
         price = decision.price
         # Never fire a zero/negative-edge order: if the model's probability is not
@@ -119,33 +149,51 @@ class Router:
         # deposits (e.g. buying a ~1%-chance leg with seconds left). Skip instead.
         if prob <= price:
             return 0.0
-        # Skip extreme longshots/shorthots (<5% or >95%): at those prices the
-        # model's edge estimate is unreliable, and a near-0.5 default reading would
-        # otherwise "find" phantom edge on a 1%-chance leg.
-        if price < 0.05 or price > 0.95:
+        # Skip extreme longshots/shorthots (<2% or >98%): at those prices the
+        # model's edge estimate is unreliable. Widen past the old 5%/95% so the
+        # model can still act on a genuine edge at e.g. a 3.5c leg.
+        lo, hi = (0.005, 0.995)
+        if price < lo or price > hi:
             return 0.0
-        dollar = quarter_kelly_size(prob, price, br, cap_pct)
-        size = shares_from_dollars(dollar, price)
+        if gusto_pm:
+            dollar = full_kelly_size(prob, price, br, cap_pct)
+            target_usd = dollar  # gusto: no USD clamp (full-Kelly recovery mode)
+        else:
+            dollar = quarter_kelly_size(prob, price, br, cap_pct)
+            # Hard $0.50–$1.15 multi-share sizing: never pin to a useless $0.10 clamp.
+            target_usd = max(MIN_ORDER_USD, min(MAX_ORDER_USD, dollar))
+        size = shares_from_dollars(target_usd, price)
+        if not gusto_pm:
+            size = max(2.0, size)  # always hold >= 2 shares/contracts when price allows
         size = fee_models.apply_min_order(v, size)
         if size <= 0:
             # With a small bankroll the Kelly size can fall below the venue minimum.
-            # Lift to the minimum so the bot keeps trading even on a tiny balance,
-            # but never let a single minimum order exceed the available bankroll.
+            # Lift to the minimum so the bot keeps trading even on a tiny balance.
             min_shares = fee_models.POLYMARKET_MIN_SHARES if v == "polymarket" else 1.0
             if min_shares * price > br:
                 return 0.0
             size = min_shares
+        if not gusto_pm:
+            # Ensure total outlay stays within [MIN_ORDER_USD, MAX_ORDER_USD + 0.10].
+            if size * price < MIN_ORDER_USD:
+                size = max(2.0, math.ceil(MIN_ORDER_USD / price))
+            elif size * price > MAX_ORDER_USD + 0.10:
+                min_shares = fee_models.POLYMARKET_MIN_SHARES if v == "polymarket" else 1.0
+                size = max(min_shares, math.floor(MAX_ORDER_USD / price))
+        logger.info(
+            "sizing %s: target_usd=%.2f price=%.4f shares=%.1f outlay=%.2f",
+            v, target_usd, price, size, size * price,
+        )
         return size
 
     def route(self, decision: StrategyDecision, venue: str, outcome: float | None = None) -> RoutedOrder:
-        """Route a decision. In paper mode, simulate a fill; in live mode, submit
-        to the exchange (blocked unless the dual check passes)."""
+        """Route a decision live (paper mode removed — no local simulation)."""
         is_maker = decision.order_type == "maker"
         fill_price = fee_models.effective_fill_price(decision.price, is_maker)
         size = self.size_for(decision)
         f = fee_models.fee(venue, size, fill_price, is_maker)
 
-        live = self.live_allowed and size > 0
+        live = size > 0
         key = idempotency_key(venue, decision.side, decision.action, fill_price, size)
         order = RoutedOrder(
             decision=decision,
@@ -162,21 +210,8 @@ class Router:
         if any(o.idempotency_key == key for o in self.orders):
             return order
 
-        if live:
-            self._route_live(venue, decision, fill_price, size, is_maker)
-        else:
-            self._settle_paper(order, outcome)
-
         self.orders.append(order)
         return order
-
-    def _route_live(
-        self, venue: str, decision: StrategyDecision, price: float, size: float, is_maker: bool
-    ) -> None:
-        """Legacy sync hook (kept for compatibility). Real placement is async — see
-        :meth:`place_order_async`."""
-        # Intentionally a no-op: the trading loop calls place_order_async() so the
-        # async exchange clients can be awaited correctly.
 
     async def place_order_async(
         self,
@@ -230,24 +265,6 @@ class Router:
                 size=size,
                 is_maker=is_maker,
             )
-
-    def _settle_paper(self, order: RoutedOrder, outcome: float | None) -> None:
-        if outcome is None:
-            order.status = "open"
-            return
-        signed = order.size if order.decision.action == "buy" else -order.size
-        settle = outcome if order.decision.side == "up" else (1.0 - outcome)
-        pnl = settle * signed - signed * order.price - order.fee
-        self._paper_pnl += pnl
-        self._paper_fees += order.fee
-
-    @property
-    def paper_pnl(self) -> float:
-        return self._paper_pnl
-
-    @property
-    def paper_fees(self) -> float:
-        return self._paper_fees
 
 
 def _venue(decision: StrategyDecision, settings: Settings) -> str:

@@ -128,7 +128,7 @@ class ProbabilityEnsemble:
         self,
         lgbm_weight: float = 0.4,
         min_shrink: float = 0.3,
-        max_shrink: float = 0.9,
+        max_shrink: float = 0.6,
     ) -> None:
         self.logreg = OnlineLogisticRegression()
         self.lgbm = LightGBMEnsemble()

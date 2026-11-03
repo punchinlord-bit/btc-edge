@@ -4,9 +4,8 @@ Combines a declarative YAML file (``config/config.yaml``) with environment
 variables (``.env``) using Pydantic v2 + pydantic-settings. The resulting
 :class:`Settings` object is the single source of truth consumed by every module.
 
-Paper-first safety: ``trading.mode`` defaults to ``"paper"`` and live routing is
-additionally gated behind ``ALLOW_LIVE_TRADING == "TRUE"`` (see
-:meth:`Settings.live_trading_allowed`).
+Paper mode has been removed; live routing is gated behind
+``ALLOW_LIVE_TRADING == "TRUE"`` (see :meth:`Settings.live_trading_allowed`).
 """
 
 from __future__ import annotations
@@ -24,16 +23,16 @@ DEFAULT_CONFIG_PATH = Path("config/config.yaml")
 
 
 class TradingConfig(BaseModel):
-    mode: Literal["paper", "live"] = "paper"
+    mode: Literal["live"] = "live"
     base_currency: str = "USD"
     bankroll: float = 20.0
     max_daily_loss_pct: float = 5.0
     # Per-trade cap: max risk on any single order, as % of the (live) bankroll.
-    # Kept deliberately small so a single wager can never be a large slice of
-    # the account. With a tiny account the venue minimum (5 shares Polymarket /
-    # 1 contract Kalshi) still applies, so the *exposure* cap below is what
-    # actually keeps the bot from stacking orders into the whole bankroll.
-    quarter_kelly_cap_pct: float = 2.0
+    # Raised from 2% to 15% so a small account can actually grow: on a tiny
+    # balance the venue minimum (5 shares Polymarket / 1 contract Kalshi) is the
+    # real floor, and the *exposure* cap below is what stops the bot stacking
+    # orders into the whole bankroll.
+    quarter_kelly_cap_pct: float = 15.0
     # Total open notional (per venue) may never exceed this % of the live
     # balance. This is the "don't burn the bankroll" guard: it stops the bot
     # from piling multiple minimum-size orders on top of each other between
@@ -45,7 +44,7 @@ class TradingConfig(BaseModel):
     # "drunk-betting" the bankroll while Kalshi trades at full efficiency.
     polymarket_cap_pct: float = 1.0
     polymarket_exposure_pct: float = 20.0
-    min_ev_threshold: float = 0.01
+    min_ev_threshold: float = 0.02
     # Don't open a new position on a side that has ALREADY moved this window.
     # ``window_delta_pct`` is in percent; e.g. 0.1 means "skip up-bets once BTC is
     # already +0.1% since open" (chasing). 0 disables the guard.
@@ -55,6 +54,29 @@ class TradingConfig(BaseModel):
     # Auto-sell (take profit) when a position's mark-to-market gain reaches this
     # percent above entry, then let the strategies re-enter if there's still edge.
     take_profit_pct: float = 85.0
+    # Near-certain all-in: when the late-scalp fires at 93-97c AND the model is
+    # >=97% confident (a genuine near-certainty in the final seconds), size up to
+    # this % of the live balance instead of the conservative Kelly cap. Deliberately
+    # NOT 100% — a single tail loss must never wipe the bankroll.
+    certainty_all_in_pct: float = 50.0
+    # Polymarket-specific hard price ceiling (a 0..1 fraction). Lower than Kalshi's
+    # 0.72 so the PM leg only enters when the contract is genuinely cheap (value),
+    # never "throwing in 70-90c" on its first bid of a window.
+    polymarket_max_contract_price: float = 0.60
+    # LLM veto gates (local Ollama 7B + remote DeepSeek grader). When True every BUY
+    # must clear both; when False they are skipped entirely so the fast deterministic
+    # gates (risk +4.5% net edge, swarm, time-decay, chase) decide alone. Set False for
+    # the fastest autonomous flow (the LLM gates were holding every signal for hours).
+    llm_gates: bool = True
+
+    @field_validator(
+        "polymarket_max_contract_price",
+    )
+    @classmethod
+    def _fraction(cls, v: float) -> float:
+        if not 0.0 < v < 1.0:
+            raise ValueError("must be between 0 and 1")
+        return v
 
     @field_validator(
         "bankroll",
@@ -141,6 +163,7 @@ class MarketMakerConfig(StrategyConfig):
     min_spread: float = 0.02
     refresh_seconds: int = 15
     spot_move_pct: float = 0.03
+    min_edge: float = 0.02  # directional edge (model prob vs market mid) to enter
 
 
 class CrowdFollowConfig(StrategyConfig):
@@ -150,7 +173,7 @@ class CrowdFollowConfig(StrategyConfig):
 
 
 class IvMispricingConfig(StrategyConfig):
-    min_divergence: float = 0.045
+    min_divergence: float = 0.02
 
 
 class StrategiesConfig(BaseModel):
@@ -207,6 +230,21 @@ class LoggingConfig(BaseModel):
     level: str = "INFO"
 
 
+class OllamaConfig(BaseModel):
+    """Local Ollama execution-gate settings (endpoint, model, inference knobs)."""
+
+    endpoint: str = "http://127.0.0.1:11434/api/chat"
+    model: str = "qwen2.5-coder:7b-instruct-q4_K_M"
+    num_ctx: int = 512
+    num_predict: int = 3
+    temperature: float = 0.0
+    num_gpu: int = 99  # 99 = offload every layer to GPU (fits a 6GB card for 7B q4)
+    # "-1" = keep the model resident forever; "0" = unload after each request;
+    # or a duration string like "5m"/"30s".
+    keep_alive: str = "-1"
+    timeout_seconds: float = 2.0  # hard cap per verdict (7B needs ~0.7-2.0s)
+
+
 class Settings(BaseSettings):
     """Top-level settings: YAML file + environment variables."""
 
@@ -232,6 +270,7 @@ class Settings(BaseSettings):
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
     web: WebConfig = Field(default_factory=WebConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
+    ollama: OllamaConfig = Field(default_factory=OllamaConfig)
 
     # Environment-only overrides (also read from .env).
     allow_live_trading: bool = Field(default=False, alias="ALLOW_LIVE_TRADING")
@@ -248,6 +287,13 @@ class Settings(BaseSettings):
     polymarket_private_key: str = Field(default="", alias="POLYMARKET_PRIVATE_KEY")
     config_path: Path = Field(default=DEFAULT_CONFIG_PATH, alias="BTC_EDGE_CONFIG_PATH")
 
+    # "Gusto" recovery mode (keyword-gated aggressive Polymarket betting).
+    # ``gusto_mode_keyword`` is the secret word an operator must type to arm it;
+    # empty means the mode can never be armed. It auto-disarms after
+    # ``gusto_mode_timeout_seconds`` so it can never leak indefinitely.
+    gusto_mode_keyword: str = Field(default="", alias="GUSTO_MODE_KEYWORD")
+    gusto_mode_timeout_seconds: int = Field(default=900, alias="GUSTO_MODE_TIMEOUT_SECONDS")
+
     @field_validator("allow_live_trading", "kalshi_use_demo", mode="before")
     @classmethod
     def _coerce_bool(cls, v: object) -> object:
@@ -256,11 +302,8 @@ class Settings(BaseSettings):
         return v
 
     def live_trading_allowed(self) -> bool:
-        """Dual safety check: mode == 'live' AND ALLOW_LIVE_TRADING == 'TRUE'."""
-        return (
-            self.trading.mode == "live"
-            and os.getenv("ALLOW_LIVE_TRADING") == "TRUE"
-        )
+        """Single live gate: ALLOW_LIVE_TRADING == 'TRUE' (paper mode removed)."""
+        return os.getenv("ALLOW_LIVE_TRADING") == "TRUE"
 
     @property
     def db_path(self) -> Path:
@@ -292,10 +335,6 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
             kalshi_env.strip().lower() in {"true", "1", "yes", "on"}
         )
 
-    mode_env = os.getenv("BTC_EDGE_MODE")
-    if mode_env is not None:
-        yaml_data.setdefault("trading", {})["mode"] = mode_env.strip().lower()
-
     settings = Settings(_env_file=os.getenv("BTC_EDGE_ENV_FILE", ".env"), **yaml_data)
     settings.config_path = path
     return settings
@@ -308,6 +347,6 @@ def get_settings() -> Settings:
 
 
 def is_live_allowed(settings: Settings | None = None) -> bool:
-    """Convenience wrapper for the dual paper-first gate."""
+    """Convenience wrapper for the live gate."""
     settings = settings or get_settings()
     return settings.live_trading_allowed()

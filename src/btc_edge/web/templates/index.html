@@ -58,6 +58,12 @@
     table { border-collapse: collapse; }
     .live-dot { display: inline-block; width: 8px; height: 8px; border-radius: 9999px; background: var(--green); box-shadow: 0 0 0 0 rgba(0,245,155,.6); animation: pulse 1.8s infinite; }
     @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(0,245,155,.5); } 70% { box-shadow: 0 0 0 7px rgba(0,245,155,0); } 100% { box-shadow: 0 0 0 0 rgba(0,245,155,0); } }
+    .ollama-dot { display: inline-block; width: 9px; height: 9px; border-radius: 9999px; margin-right: 5px; vertical-align: middle; }
+    .ollama-ready { background: var(--green); animation: ollama-blink 1.2s infinite; }
+    .ollama-loading { background: #f59e0b; animation: ollama-blink 0.55s infinite; }
+    .ollama-offline { background: var(--red); }
+    .ollama-disabled { background: #475569; }
+    @keyframes ollama-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.15; } }
   </style>
 </head>
 <body class="min-h-screen p-4 md:p-6 max-w-7xl mx-auto">
@@ -65,6 +71,9 @@
   <div class="banner mb-6">
     <img src="/static/banner.png" alt="BTC-Edge" class="w-full h-auto block" />
   </div>
+
+  <!-- Command Deck: live watchdog + readiness + shadow trade log (full width, above panels). -->
+  <div id="ops-deck" class="mb-6"></div>
 
   <header class="site mb-6 rounded-b-2xl">
     <div class="flex flex-wrap items-center justify-between gap-3 py-3">
@@ -77,6 +86,9 @@
         <span id="engine-status" class="pill bg-gray-700">⏳ checking…</span>
         <span id="mode-badge" class="pill bg-red-700">🔴 LIVE</span>
         <span id="trade-only" class="pill bg-gray-700">🔐 trade-only</span>
+        <span id="ollama-status" class="pill bg-gray-700">🤖 OLLAMA loading…</span>
+        <select id="ollama-model-select" class="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 font-mono max-w-64"></select>
+        <button id="ollama-switch-btn" class="px-2 py-1 rounded bg-cyan-700 hover:bg-cyan-600 text-white text-xs font-semibold">SWITCH</button>
       </div>
     </div>
   </header>
@@ -102,6 +114,13 @@
           <span class="text-gray-400"><b id="wallet-poly-trades">0</b> trades</span>
         </div>
         <div class="mt-1 text-xs text-gray-400">Win <b id="wallet-poly-win" class="text-green-400">0%</b> · Loss <b id="wallet-poly-loss" class="text-red-400">0%</b></div>
+        <div class="mt-3 pt-3 border-t border-purple-700/30">
+          <div class="flex items-center gap-2">
+            <input id="gusto-keyword" type="password" autocomplete="off" placeholder="keyword" class="flex-1 min-w-0 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200" />
+            <button id="gusto-btn" class="px-3 py-1 rounded bg-purple-700 hover:bg-purple-600 text-white text-sm font-semibold whitespace-nowrap">GUSTO</button>
+          </div>
+          <div id="gusto-status" class="text-xs text-gray-500 mt-1">OFF</div>
+        </div>
       </div>
       <div class="card border-emerald-700/40">
         <div class="widget-title"><span>🏦</span> Total Wallet <span>🤑</span></div>
@@ -256,6 +275,15 @@
     let rocketStrike = null;
     let apiKey = localStorage.getItem('btcApiKey') || 'btcmoney';
     let name = localStorage.getItem('btcName') || '';
+    let gustoArmed = false;
+    // Monotonic win counter from the backend; when it bumps, play the "yeaaa" sound.
+    let lastSellWinSeq = null;
+    function playWinSound() {
+      try {
+        const a = new Audio('/static/yeaaa_yeaaa.mp3');
+        a.play().catch(() => {});
+      } catch (e) { /* ignore */ }
+    }
     function apiHeaders() { return apiKey ? { 'X-API-Key': apiKey } : {}; }
     function ensureKey() {
       if (apiKey) return;
@@ -423,6 +451,21 @@
       if (s.kill_switch) { se.textContent = '🛑 HALTED'; se.className = 'pill bg-red-900 text-red-300'; }
       else { se.textContent = s.mode === 'live' ? '🟢 LIVE' : '🟢 PAPER'; se.className = 'pill bg-emerald-900 text-emerald-300'; }
 
+      const os = document.getElementById('ollama-status');
+      if (os) {
+        const o = s.ollama_status || {};
+        const state = o.state || 'disabled';
+        let dot = 'ollama-disabled', label = 'OLLAMA off';
+        if (state === 'ready') { dot = 'ollama-ready'; label = 'OLLAMA ready'; }
+        else if (state === 'loading') { dot = 'ollama-loading'; label = 'OLLAMA loading…'; }
+        else if (state === 'offline') { dot = 'ollama-offline'; label = 'OLLAMA offline'; }
+        const lat = o.last_latency_ms ? ' · ' + o.last_latency_ms + 'ms' : '';
+        const v = o.last_verdict ? ' · ' + o.last_verdict : '';
+        os.innerHTML = '<span class="ollama-dot ' + dot + '"></span>🤖 ' + label + lat + v;
+        os.title = '7B gate · ' + (o.num_verdicts || 0) + ' verdicts · ' + (o.num_vetoes || 0) +
+          ' vetoes · ' + (o.num_timeouts || 0) + ' timeouts' + (o.model ? ' · ' + o.model : '');
+      }
+
       const vb = s.wallet_balances || {};
       document.getElementById('wallet-kalshi-balance').textContent = money(vb.kalshi);
       document.getElementById('wallet-poly-balance').textContent = money(vb.polymarket);
@@ -440,6 +483,19 @@
       const pw = pm.wins || 0, pl = pm.losses || 0, ptot = pw + pl;
       document.getElementById('wallet-poly-win').textContent = (ptot > 0 ? Math.round(pw / ptot * 100) : 0) + '%';
       document.getElementById('wallet-poly-loss').textContent = (ptot > 0 ? Math.round(pl / ptot * 100) : 0) + '%';
+      gustoArmed = !!s.gusto_mode;
+      const gb = document.getElementById('gusto-btn');
+      const gs = document.getElementById('gusto-status');
+      if (gb) {
+        gb.textContent = gustoArmed ? 'DISARM' : 'GUSTO';
+        gb.className = gustoArmed
+          ? 'px-3 py-1 rounded bg-red-700 hover:bg-red-600 text-white text-sm font-semibold whitespace-nowrap'
+          : 'px-3 py-1 rounded bg-purple-700 hover:bg-purple-600 text-white text-sm font-semibold whitespace-nowrap';
+      }
+      if (gs) {
+        gs.textContent = gustoArmed ? '🔥 ARMED — aggressive recovery' : 'OFF';
+        gs.className = gustoArmed ? 'text-xs text-red-400 mt-1' : 'text-xs text-gray-500 mt-1';
+      }
       const totalBal = Number(vb.kalshi || 0) + Number(vb.polymarket || 0);
       document.getElementById('wallet-total-bankroll').textContent = money(totalBal);
       const tp = document.getElementById('wallet-total-pnl');
@@ -609,6 +665,15 @@
           return;
         }
         const [m, o, st] = await Promise.all(rs.map(r => r.json()));
+        // Play the celebration sound when the backend bumps the profitable-sell
+        // counter (fires once per win; the counter is monotonic).
+        const seq = (m && m.sell_win_seq) || 0;
+        if (lastSellWinSeq === null) {
+          lastSellWinSeq = seq;
+        } else if (seq > lastSellWinSeq) {
+          lastSellWinSeq = seq;
+          playWinSound();
+        }
         render(Object.assign({}, m, o, st));
       } catch (e) { /* ignore */ }
     }
@@ -627,6 +692,24 @@
       toast(d.message || '▶ Engine resumed');
       poll();
     });
+    document.getElementById('gusto-btn').addEventListener('click', async () => {
+      ensureKey();
+      const arming = !gustoArmed;
+      const keyword = arming ? (document.getElementById('gusto-keyword').value || '').trim() : '';
+      try {
+        const r = await fetch('/api/gusto-mode', {
+          method: 'POST',
+          headers: { ...apiHeaders(), 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled: arming, keyword }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (r.status === 403) { toast(d.detail || '❌ Wrong keyword'); return; }
+        gustoArmed = !!d.gusto_mode;
+        toast(arming ? '🔥 GUSTO armed' : 'Gusto disarmed');
+        document.getElementById('gusto-keyword').value = '';
+        poll();
+      } catch (e) { toast('Gusto toggle failed'); }
+    });
     document.getElementById('ask-ai').addEventListener('click', async () => {
       ensureKey();
       const out = document.getElementById('ai-output');
@@ -638,13 +721,47 @@
       } catch (e) { out.textContent = 'The AI assistant is unavailable right now.'; }
     });
 
+    async function loadOllamaModels() {
+      try {
+        const r = await fetch('/api/ollama/models', { headers: apiHeaders() });
+        if (r.status === 401) return;
+        const d = await r.json();
+        const sel = document.getElementById('ollama-model-select');
+        if (!sel) return;
+        const current = d.current || '';
+        sel.innerHTML = (d.models || []).map(m =>
+          '<option value="' + m.name + '"' + (m.name === current ? ' selected' : '') + '>' + m.name + ' (' + m.size_gb + 'GB)</option>'
+        ).join('') || '<option value="">(no models)</option>';
+      } catch (e) { /* ignore */ }
+    }
+
+    document.getElementById('ollama-switch-btn').addEventListener('click', async () => {
+      ensureKey();
+      const model = document.getElementById('ollama-model-select').value;
+      if (!model) return;
+      try {
+        const r = await fetch('/api/ollama/switch', {
+          method: 'POST',
+          headers: { ...apiHeaders(), 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model }),
+        });
+        const d = await r.json();
+        toast(d.ok ? '🔄 Switching to ' + model + '…' : (d.error || 'Switch failed'));
+      } catch (e) { toast('Switch failed'); }
+    });
+
     ensureKey();
     initChart();
     initPriceChart();
     initProbChart();
+    loadOllamaModels();
     poll();
     setInterval(poll, 1000);
+    setInterval(loadOllamaModels, 30000);
   </script>
+
+  <script src="/static/js/opsWidget.js"></script>
+  <script>OpsWidget.mount(document.getElementById('ops-deck'), {});</script>
 
 </html>
 

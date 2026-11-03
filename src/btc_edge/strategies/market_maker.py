@@ -23,12 +23,14 @@ class MarketMakerStrategy(Strategy):
         min_spread: float = 0.02,
         refresh_seconds: int = 15,
         spot_move_pct: float = 0.03,
+        min_edge: float = 0.01,
     ) -> None:
         self.min_time_remaining = float(min_time_remaining)
         self.levels = levels
         self.min_spread = min_spread
         self.refresh_seconds = refresh_seconds
         self.spot_move_pct = spot_move_pct
+        self.min_edge = min_edge
         self._last_quote_ts: dict[str, float] = {}
         self.rule = self._build_rule()
 
@@ -57,42 +59,38 @@ class MarketMakerStrategy(Strategy):
 
         self._last_quote_ts[venue] = time.time()
 
-        # Buy the side the model predicts. When the model says "down" we stand
-        # aside entirely — never buy "up" into a falling market, and we can't short
-        # without margin/inventory. This prevents wrong-direction bets.
+        # Directional edge: bet the side where the model's estimate beats the
+        # market's price. When the model thinks "up" is MORE likely than the market
+        # prices it (prob_up > fair), buy "up"; when LESS, buy "down" (the NO leg).
+        # This replaces the old ``prob_up >= 0.5`` gate, which ignored the market
+        # and fired "up" even when the market was already pricing "up" higher.
         fair = ctx.contract_price
         prob_up = ctx.prob_estimate
-        direction = "up" if prob_up >= 0.5 else "down"
+        edge = prob_up - fair
+        if edge >= self.min_edge:
+            side, side_prob = "up", prob_up
+        elif edge <= -self.min_edge:
+            side, side_prob = "down", 1.0 - prob_up
+        else:
+            # No meaningful edge vs the market mid -> stand aside.
+            return []
         decisions: list[StrategyDecision] = []
-        if direction != "up":
-            return decisions  # model says "down" — stand aside, don't bet against it
         for lvl in range(self.levels):
-            if venue == "kalshi":
-                buy_price = min(0.99, round(fair + (lvl + 1) * (spread / 2.0), 2))
-                decisions.append(StrategyDecision(
-                    strategy=self.name,
-                    side="up",
-                    action="buy",
-                    price=buy_price,
-                    size=5.0,
-                    order_type="taker",
-                    reason=f"taker buy up level {lvl + 1}",
-                    prob_estimate=prob_up,
-                    ev_estimate=prob_up - buy_price,
-                    rule_snapshot=snapshot,
-                ))
-            else:
-                bid_price = max(0.01, round(fair - (lvl + 1) * (spread / 2.0), 2))
-                decisions.append(StrategyDecision(
-                    strategy=self.name,
-                    side="up",
-                    action="buy",
-                    price=bid_price,
-                    size=5.0,
-                    order_type="maker",
-                    reason=f"bid level {lvl + 1}",
-                    prob_estimate=fair,
-                    ev_estimate=fair - bid_price,
-                    rule_snapshot=snapshot,
-                ))
+            # Post a maker BID *below the model's own fair value* (side_prob) on the
+            # edge side, capturing half the spread when filled. The old code priced
+            # off the market mid and bought ABOVE fair (at the ask), which is
+            # structurally negative-EV; now the order always has positive edge.
+            bid_price = max(0.01, round(side_prob - (lvl + 1) * (spread / 2.0), 2))
+            decisions.append(StrategyDecision(
+                strategy=self.name,
+                side=side,
+                action="buy",
+                price=bid_price,
+                size=5.0,
+                order_type="maker",
+                reason=f"bid {side} level {lvl + 1}",
+                prob_estimate=side_prob,
+                ev_estimate=side_prob - bid_price,
+                rule_snapshot=snapshot,
+            ))
         return decisions

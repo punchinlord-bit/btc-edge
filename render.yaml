@@ -7,9 +7,11 @@ services:
     plan: standard   # paid tier — REQUIRED for the persistent disk below (free tier has no disks)
     healthCheckPath: /api/health
     envVars:
-      # ---- Safety (paper-first) ----
+      # ---- Safety (Render is a READ-ONLY dashboard mirror; the live trader runs
+      #      on the operator's own machine). ALLOW_LIVE_TRADING=FALSE blocks order
+      #      routing on Render so two engines never trade the same accounts. ----
       - key: ALLOW_LIVE_TRADING
-        value: "TRUE"
+        value: "FALSE"
       - key: BTC_EDGE_MODE
         value: "live"
       - key: BTC_EDGE_CONFIG_PATH

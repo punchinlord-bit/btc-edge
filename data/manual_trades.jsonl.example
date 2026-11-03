@@ -1,0 +1,6 @@
+# Operator's manual Kalshi UI trades — one JSON object per line.
+# Copy this file to data/manual_trades.jsonl and append your trades.
+# Each line: {"won": true, "pnl": 5.0}   (positive pnl = win, negative = loss)
+#   or simply {"pnl": 5.0} (positive = win, negative = loss).
+{"won": true, "pnl": 4.50}
+{"won": false, "pnl": -3.00}
